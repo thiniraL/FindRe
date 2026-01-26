@@ -3,6 +3,7 @@ import { createUser } from '@/lib/db/queries/users';
 import { generateTokens } from '@/lib/auth/jwt';
 import { createRefreshToken } from '@/lib/db/queries/tokens';
 import { assignRoleToUser, getRoleByName } from '@/lib/db/queries/roles';
+import { sendVerificationEmail } from '@/lib/email/send';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { registerSchema } from '@/lib/security/validation';
@@ -54,7 +55,18 @@ async function handler(request: NextRequest) {
     const preferredLanguageCode = body.preferredLanguageCode || detectedLanguage || 'en';
 
     // Create user with language preference
-    const user = await createUser(body.email, body.password, preferredLanguageCode);
+    const { user, emailVerificationToken } = await createUser(
+      body.email,
+      body.password,
+      preferredLanguageCode
+    );
+
+    try {
+      await sendVerificationEmail(user.email, emailVerificationToken);
+    } catch (err) {
+      // Don't fail registration if email provider is down
+      console.error('Failed to send verification email:', err);
+    }
 
     // Assign default role (buyer)
     const defaultRole = await getRoleByName('buyer');

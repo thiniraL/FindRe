@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getUserByEmail, setPasswordResetToken } from '@/lib/db/queries/users';
 import { generateToken } from '@/lib/auth/password';
+import { sendPasswordResetEmail } from '@/lib/email/send';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { forgotPasswordSchema } from '@/lib/security/validation';
@@ -21,8 +22,12 @@ async function handler(request: NextRequest) {
 
       await setPasswordResetToken(user.email, resetToken, expiresAt);
 
-      // TODO: Send email with reset link
-      // await sendPasswordResetEmail(user.email, resetToken);
+      try {
+        await sendPasswordResetEmail(user.email, resetToken);
+      } catch (err) {
+        // Don't fail the endpoint (avoid leaking account existence / keep UX stable)
+        console.error('Failed to send password reset email:', err);
+      }
     }
 
     return createSuccessResponse({
@@ -34,6 +39,7 @@ async function handler(request: NextRequest) {
 }
 
 export const POST = withRateLimit(rateLimits.passwordReset)(handler);
+
 
 
 

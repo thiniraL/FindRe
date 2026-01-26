@@ -1,7 +1,12 @@
 import { dbLogin as supabase } from '@/lib/db/client';
 import { Role, Permission } from '@/lib/types/auth';
 
-type PermissionJoinRow = { permissions: Permission | null };
+type PermissionJoinRow = { permissions: Permission | Permission[] | null };
+
+function normalizePermission(p: Permission | Permission[] | null | undefined): Permission | null {
+  if (!p) return null;
+  return Array.isArray(p) ? p[0] ?? null : p;
+}
 
 /**
  * Get all roles
@@ -145,7 +150,7 @@ export async function getRolePermissions(roleId: string): Promise<Permission[]> 
 
   return (
     (data as PermissionJoinRow[] | null | undefined)
-      ?.map((rp) => rp.permissions)
+      ?.map((rp) => normalizePermission(rp.permissions))
       .filter((p): p is Permission => Boolean(p)) || []
   );
 }
@@ -296,7 +301,7 @@ export async function getUserDirectPermissions(userId: string): Promise<Permissi
 
   return (
     (data as PermissionJoinRow[] | null | undefined)
-      ?.map((up) => up.permissions)
+      ?.map((up) => normalizePermission(up.permissions))
       .filter((p): p is Permission => Boolean(p)) || []
   );
 }

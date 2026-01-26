@@ -1,10 +1,15 @@
 import { dbLogin as supabase } from '@/lib/db/client';
 import { Permission, Role } from '@/lib/types/auth';
 
-type RolePermissionJoinRow = { permissions?: Permission | null };
+type RolePermissionJoinRow = { permissions?: Permission | Permission[] | null };
 type RoleJoin = { role_permissions?: RolePermissionJoinRow[] | null };
 type UserRoleJoin = { roles?: RoleJoin | RoleJoin[] | null };
-type UserPermissionJoinRow = { permissions?: Permission | null };
+type UserPermissionJoinRow = { permissions?: Permission | Permission[] | null };
+
+function normalizePermission(p: Permission | Permission[] | null | undefined): Permission | null {
+  if (!p) return null;
+  return Array.isArray(p) ? p[0] ?? null : p;
+}
 
 /**
  * Get all permissions for a user (role permissions + direct user permissions)
@@ -44,7 +49,7 @@ export async function getUserPermissions(userId: string): Promise<Permission[]> 
     const role = Array.isArray(roles) ? roles[0] : roles;
     const rolePermissions = role?.role_permissions || [];
     rolePermissions.forEach((rp: RolePermissionJoinRow) => {
-      const permission = rp.permissions;
+      const permission = normalizePermission(rp.permissions);
       if (permission) {
         permissionMap.set(permission.id, permission);
       }
@@ -72,7 +77,7 @@ export async function getUserPermissions(userId: string): Promise<Permission[]> 
 
   // Add direct user permissions
   (userPermData as UserPermissionJoinRow[] | null | undefined)?.forEach((up) => {
-    const permission = up.permissions;
+    const permission = normalizePermission(up.permissions);
     if (permission) {
       permissionMap.set(permission.id, permission);
     }

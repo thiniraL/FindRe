@@ -2,6 +2,11 @@ import { dbLogin as supabase } from '@/lib/db/client';
 import { User, UserWithPassword } from '@/lib/types/auth';
 import { hashPassword, generateToken } from '@/lib/auth/password';
 
+export type CreateUserResult = {
+  user: User;
+  emailVerificationToken: string;
+};
+
 /**
  * Create a new user
  */
@@ -9,7 +14,7 @@ export async function createUser(
   email: string,
   password: string,
   preferredLanguageCode?: string
-): Promise<User> {
+): Promise<CreateUserResult> {
   const passwordHash = await hashPassword(password);
   const emailVerificationToken = generateToken();
 
@@ -35,7 +40,10 @@ export async function createUser(
   // Remove password_hash from returned data
   const { password_hash: _password_hash, ...user } = data;
   void _password_hash;
-  return user as User;
+  return {
+    user: user as User,
+    emailVerificationToken,
+  };
 }
 
 /**
@@ -118,6 +126,23 @@ export async function verifyUserEmail(token: string): Promise<User> {
   }
 
   return data as User;
+}
+
+/**
+ * Set email verification token (for resends)
+ */
+export async function setEmailVerificationToken(email: string, token: string): Promise<void> {
+  const { error } = await supabase
+    .from('users')
+    .update({
+      email_verification_token: token,
+    })
+    .eq('email', email.toLowerCase().trim())
+    .eq('email_verified', false);
+
+  if (error) {
+    throw new Error(`Failed to set email verification token: ${error.message}`);
+  }
 }
 
 /**
