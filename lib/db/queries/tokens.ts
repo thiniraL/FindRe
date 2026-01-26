@@ -1,6 +1,6 @@
-import { dbLogin as supabase } from '@/lib/db/client';
 import { RefreshToken } from '@/lib/types/auth';
 import * as crypto from 'crypto';
+import { query, queryOne } from '@/lib/db/pg';
 
 /**
  * Hash refresh token before storing
@@ -22,24 +22,29 @@ export async function createRefreshToken(
 ): Promise<RefreshToken> {
   const hashedToken = hashRefreshToken(token);
 
-  const { data, error } = await supabase
-    .from('refresh_tokens')
-    .insert({
-      user_id: userId,
-      token: hashedToken,
-      expires_at: expiresAt.toISOString(),
-      device_id: deviceId,
-      ip_address: ipAddress,
-      user_agent: userAgent,
-    })
-    .select()
-    .single();
+  const refreshToken = await queryOne<RefreshToken>(
+    `INSERT INTO login.refresh_tokens (
+      user_id,
+      token,
+      expires_at,
+      device_id,
+      ip_address,
+      user_agent
+    )
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING *`,
+    [
+      userId,
+      hashedToken,
+      expiresAt.toISOString(),
+      deviceId ?? null,
+      ipAddress ?? null,
+      userAgent ?? null,
+    ]
+  );
 
-  if (error) {
-    throw new Error(`Failed to create refresh token: ${error.message}`);
-  }
-
-  return data as RefreshToken;
+  if (!refreshToken) throw new Error('Failed to create refresh token');
+  return refreshToken;
 }
 
 /**
@@ -48,22 +53,16 @@ export async function createRefreshToken(
 export async function getRefreshToken(token: string): Promise<RefreshToken | null> {
   const hashedToken = hashRefreshToken(token);
 
-  const { data, error } = await supabase
-    .from('refresh_tokens')
-    .select('*')
-    .eq('token', hashedToken)
-    .is('revoked_at', null)
-    .gt('expires_at', new Date().toISOString())
-    .single();
+  const refreshToken = await queryOne<RefreshToken>(
+    `SELECT *
+     FROM login.refresh_tokens
+     WHERE token = $1
+       AND revoked_at IS NULL
+       AND expires_at > (NOW() AT TIME ZONE 'UTC')`,
+    [hashedToken]
+  );
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch refresh token: ${error.message}`);
-  }
-
-  return data as RefreshToken;
+  return refreshToken;
 }
 
 /**
@@ -72,43 +71,34 @@ export async function getRefreshToken(token: string): Promise<RefreshToken | nul
 export async function revokeRefreshToken(token: string): Promise<void> {
   const hashedToken = hashRefreshToken(token);
 
-  const { error } = await supabase
-    .from('refresh_tokens')
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('token', hashedToken);
-
-  if (error) {
-    throw new Error(`Failed to revoke refresh token: ${error.message}`);
-  }
+  await query(
+    `UPDATE login.refresh_tokens
+     SET revoked_at = $1
+     WHERE token = $2`,
+    [new Date().toISOString(), hashedToken]
+  );
 }
 
 /**
  * Revoke all refresh tokens for a user
  */
 export async function revokeAllUserRefreshTokens(userId: string): Promise<void> {
-  const { error } = await supabase
-    .from('refresh_tokens')
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('user_id', userId)
-    .is('revoked_at', null);
-
-  if (error) {
-    throw new Error(`Failed to revoke user refresh tokens: ${error.message}`);
-  }
+  await query(
+    `UPDATE login.refresh_tokens
+     SET revoked_at = $1
+     WHERE user_id = $2 AND revoked_at IS NULL`,
+    [new Date().toISOString(), userId]
+  );
 }
 
 /**
  * Delete expired refresh tokens (cleanup job)
  */
 export async function deleteExpiredRefreshTokens(): Promise<void> {
-  const { error } = await supabase
-    .from('refresh_tokens')
-    .delete()
-    .lt('expires_at', new Date().toISOString());
-
-  if (error) {
-    throw new Error(`Failed to delete expired refresh tokens: ${error.message}`);
-  }
+  await query(
+    `DELETE FROM login.refresh_tokens
+     WHERE expires_at < (NOW() AT TIME ZONE 'UTC')`
+  );
 }
 
 

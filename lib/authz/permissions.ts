@@ -1,121 +1,37 @@
-import { dbLogin as supabase } from '@/lib/db/client';
 import { Permission, Role } from '@/lib/types/auth';
-
-type RolePermissionJoinRow = { permissions?: Permission | Permission[] | null };
-type RoleJoin = { role_permissions?: RolePermissionJoinRow[] | null };
-type UserRoleJoin = { roles?: RoleJoin | RoleJoin[] | null };
-type UserPermissionJoinRow = { permissions?: Permission | Permission[] | null };
-
-function normalizePermission(p: Permission | Permission[] | null | undefined): Permission | null {
-  if (!p) return null;
-  return Array.isArray(p) ? p[0] ?? null : p;
-}
+import { query, queryOne } from '@/lib/db/pg';
 
 /**
  * Get all permissions for a user (role permissions + direct user permissions)
  */
 export async function getUserPermissions(userId: string): Promise<Permission[]> {
-  const permissionMap = new Map<string, Permission>();
-
-  // Get role permissions
-  const { data: userRoleData, error: userRoleError } = await supabase
-    .from('user_roles')
-    .select(`
-      role_id,
-      roles!inner(
-        id,
-        role_permissions!inner(
-          permission_id,
-          permissions!inner(
-            id,
-            resource,
-            action,
-            description,
-            created_at
-          )
-        )
-      )
-    `)
-    .eq('user_id', userId)
-    .single();
-
-  if (userRoleError && userRoleError.code !== 'PGRST116') {
-    throw new Error(`Failed to fetch user role permissions: ${userRoleError.message}`);
-  }
-
-  // Add role permissions
-  if (userRoleData) {
-    const roles = (userRoleData as UserRoleJoin).roles;
-    const role = Array.isArray(roles) ? roles[0] : roles;
-    const rolePermissions = role?.role_permissions || [];
-    rolePermissions.forEach((rp: RolePermissionJoinRow) => {
-      const permission = normalizePermission(rp.permissions);
-      if (permission) {
-        permissionMap.set(permission.id, permission);
-      }
-    });
-  }
-
-  // Get direct user permissions
-  const { data: userPermData, error: userPermError } = await supabase
-    .from('user_permissions')
-    .select(`
-      permission_id,
-      permissions!inner(
-        id,
-        resource,
-        action,
-        description,
-        created_at
-      )
-    `)
-    .eq('user_id', userId);
-
-  if (userPermError) {
-    throw new Error(`Failed to fetch user direct permissions: ${userPermError.message}`);
-  }
-
-  // Add direct user permissions
-  (userPermData as UserPermissionJoinRow[] | null | undefined)?.forEach((up) => {
-    const permission = normalizePermission(up.permissions);
-    if (permission) {
-      permissionMap.set(permission.id, permission);
-    }
-  });
-
-  return Array.from(permissionMap.values());
+  // UNION role-based permissions and direct user permissions.
+  return await query<Permission>(
+    `SELECT DISTINCT p.id, p.resource, p.action, p.description, p.created_at
+     FROM login.permissions p
+     JOIN login.role_permissions rp ON rp.permission_id = p.id
+     JOIN login.user_roles ur ON ur.role_id = rp.role_id
+     WHERE ur.user_id = $1
+     UNION
+     SELECT DISTINCT p.id, p.resource, p.action, p.description, p.created_at
+     FROM login.permissions p
+     JOIN login.user_permissions up ON up.permission_id = p.id
+     WHERE up.user_id = $1`,
+    [userId]
+  );
 }
 
 /**
  * Get the role for a user (single role)
  */
 export async function getUserRole(userId: string): Promise<Role | null> {
-  const { data, error } = await supabase
-    .from('user_roles')
-    .select(`
-      role_id,
-      roles!inner(
-        id,
-        name,
-        description,
-        is_system,
-        created_at,
-        updated_at
-      )
-    `)
-    .eq('user_id', userId)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // User has no role
-    }
-    throw new Error(`Failed to fetch user role: ${error.message}`);
-  }
-
-  const roles = (data as { roles?: Role | Role[] | null } | null | undefined)?.roles;
-  const role = Array.isArray(roles) ? roles[0] : roles;
-  return role || null;
+  return await queryOne<Role>(
+    `SELECT r.id, r.name, r.description, r.is_system, r.created_at, r.updated_at
+     FROM login.user_roles ur
+     JOIN login.roles r ON r.id = ur.role_id
+     WHERE ur.user_id = $1`,
+    [userId]
+  );
 }
 
 /**

@@ -1,40 +1,27 @@
-import { dbLogin as supabase } from '@/lib/db/client';
 import { Permission } from '@/lib/types/auth';
+import { isPgUniqueViolation, query, queryOne } from '@/lib/db/pg';
 
 /**
  * Get all permissions
  */
 export async function getAllPermissions(): Promise<Permission[]> {
-  const { data, error } = await supabase
-    .from('permissions')
-    .select('*')
-    .order('resource, action');
-
-  if (error) {
-    throw new Error(`Failed to fetch permissions: ${error.message}`);
-  }
-
-  return data || [];
+  return await query<Permission>(
+    `SELECT *
+     FROM login.permissions
+     ORDER BY resource, action`
+  );
 }
 
 /**
  * Get permission by ID
  */
 export async function getPermissionById(permissionId: string): Promise<Permission | null> {
-  const { data, error } = await supabase
-    .from('permissions')
-    .select('*')
-    .eq('id', permissionId)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch permission: ${error.message}`);
-  }
-
-  return data as Permission;
+  return await queryOne<Permission>(
+    `SELECT *
+     FROM login.permissions
+     WHERE id = $1`,
+    [permissionId]
+  );
 }
 
 /**
@@ -45,24 +32,23 @@ export async function createPermission(
   action: string,
   description?: string
 ): Promise<Permission> {
-  const { data, error } = await supabase
-    .from('permissions')
-    .insert({
-      resource,
-      action,
-      description,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    if (error.code === '23505') {
+  try {
+    const permission = await queryOne<Permission>(
+      `INSERT INTO login.permissions (resource, action, description)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [resource, action, description ?? null]
+    );
+    if (!permission) throw new Error('Failed to create permission');
+    return permission;
+  } catch (err) {
+    if (isPgUniqueViolation(err)) {
       throw new Error('Permission already exists');
     }
-    throw new Error(`Failed to create permission: ${error.message}`);
+    throw err instanceof Error
+      ? new Error(`Failed to create permission: ${err.message}`)
+      : new Error('Failed to create permission');
   }
-
-  return data as Permission;
 }
 
 

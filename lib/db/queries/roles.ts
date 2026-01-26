@@ -1,67 +1,39 @@
-import { dbLogin as supabase } from '@/lib/db/client';
 import { Role, Permission } from '@/lib/types/auth';
-
-type PermissionJoinRow = { permissions: Permission | Permission[] | null };
-
-function normalizePermission(p: Permission | Permission[] | null | undefined): Permission | null {
-  if (!p) return null;
-  return Array.isArray(p) ? p[0] ?? null : p;
-}
+import { isPgUniqueViolation, query, queryOne } from '@/lib/db/pg';
 
 /**
  * Get all roles
  */
 export async function getAllRoles(): Promise<Role[]> {
-  const { data, error } = await supabase
-    .from('roles')
-    .select('*')
-    .order('name');
-
-  if (error) {
-    throw new Error(`Failed to fetch roles: ${error.message}`);
-  }
-
-  return data || [];
+  return await query<Role>(
+    `SELECT *
+     FROM login.roles
+     ORDER BY name`
+  );
 }
 
 /**
  * Get role by ID
  */
 export async function getRoleById(roleId: string): Promise<Role | null> {
-  const { data, error } = await supabase
-    .from('roles')
-    .select('*')
-    .eq('id', roleId)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch role: ${error.message}`);
-  }
-
-  return data as Role;
+  return await queryOne<Role>(
+    `SELECT *
+     FROM login.roles
+     WHERE id = $1`,
+    [roleId]
+  );
 }
 
 /**
  * Get role by name
  */
 export async function getRoleByName(name: string): Promise<Role | null> {
-  const { data, error } = await supabase
-    .from('roles')
-    .select('*')
-    .eq('name', name)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch role: ${error.message}`);
-  }
-
-  return data as Role;
+  return await queryOne<Role>(
+    `SELECT *
+     FROM login.roles
+     WHERE name = $1`,
+    [name]
+  );
 }
 
 /**
@@ -71,23 +43,23 @@ export async function createRole(
   name: string,
   description?: string
 ): Promise<Role> {
-  const { data, error } = await supabase
-    .from('roles')
-    .insert({
-      name,
-      description,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    if (error.code === '23505') {
+  try {
+    const role = await queryOne<Role>(
+      `INSERT INTO login.roles (name, description)
+       VALUES ($1, $2)
+       RETURNING *`,
+      [name, description ?? null]
+    );
+    if (!role) throw new Error('Failed to create role');
+    return role;
+  } catch (err) {
+    if (isPgUniqueViolation(err)) {
       throw new Error('Role name already exists');
     }
-    throw new Error(`Failed to create role: ${error.message}`);
+    throw err instanceof Error
+      ? new Error(`Failed to create role: ${err.message}`)
+      : new Error('Failed to create role');
   }
-
-  return data as Role;
 }
 
 /**
@@ -97,61 +69,47 @@ export async function updateRole(
   roleId: string,
   updates: Partial<Role>
 ): Promise<Role> {
-  const { data, error } = await supabase
-    .from('roles')
-    .update(updates)
-    .eq('id', roleId)
-    .select()
-    .single();
+  const keys = (Object.keys(updates) as Array<keyof Role>).filter(
+    (k): k is 'name' | 'description' => k === 'name' || k === 'description'
+  );
+  if (keys.length === 0) throw new Error('No valid fields to update');
 
-  if (error) {
-    throw new Error(`Failed to update role: ${error.message}`);
-  }
+  const sets = keys.map((k, idx) => `"${k}" = $${idx + 1}`);
+  const values = keys.map((k) => (updates as Record<string, unknown>)[k] ?? null);
+  values.push(roleId);
 
-  return data as Role;
+  const role = await queryOne<Role>(
+    `UPDATE login.roles
+     SET ${sets.join(', ')}
+     WHERE id = $${values.length}
+     RETURNING *`,
+    values
+  );
+  if (!role) throw new Error('Failed to update role');
+  return role;
 }
 
 /**
  * Delete role (only if not system role)
  */
 export async function deleteRole(roleId: string): Promise<void> {
-  const { error } = await supabase
-    .from('roles')
-    .delete()
-    .eq('id', roleId)
-    .eq('is_system', false);
-
-  if (error) {
-    throw new Error(`Failed to delete role: ${error.message}`);
-  }
+  await query(
+    `DELETE FROM login.roles
+     WHERE id = $1 AND is_system = FALSE`,
+    [roleId]
+  );
 }
 
 /**
  * Get permissions for a role
  */
 export async function getRolePermissions(roleId: string): Promise<Permission[]> {
-  const { data, error } = await supabase
-    .from('role_permissions')
-    .select(`
-      permission_id,
-      permissions!inner(
-        id,
-        resource,
-        action,
-        description,
-        created_at
-      )
-    `)
-    .eq('role_id', roleId);
-
-  if (error) {
-    throw new Error(`Failed to fetch role permissions: ${error.message}`);
-  }
-
-  return (
-    (data as PermissionJoinRow[] | null | undefined)
-      ?.map((rp) => normalizePermission(rp.permissions))
-      .filter((p): p is Permission => Boolean(p)) || []
+  return await query<Permission>(
+    `SELECT p.id, p.resource, p.action, p.description, p.created_at
+     FROM login.role_permissions rp
+     JOIN login.permissions p ON p.id = rp.permission_id
+     WHERE rp.role_id = $1`,
+    [roleId]
   );
 }
 
@@ -162,18 +120,19 @@ export async function assignPermissionToRole(
   roleId: string,
   permissionId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('role_permissions')
-    .insert({
-      role_id: roleId,
-      permission_id: permissionId,
-    });
-
-  if (error) {
-    if (error.code === '23505') {
+  try {
+    await query(
+      `INSERT INTO login.role_permissions (role_id, permission_id)
+       VALUES ($1, $2)`,
+      [roleId, permissionId]
+    );
+  } catch (err) {
+    if (isPgUniqueViolation(err)) {
       throw new Error('Permission already assigned to role');
     }
-    throw new Error(`Failed to assign permission: ${error.message}`);
+    throw err instanceof Error
+      ? new Error(`Failed to assign permission: ${err.message}`)
+      : new Error('Failed to assign permission');
   }
 }
 
@@ -184,15 +143,11 @@ export async function removePermissionFromRole(
   roleId: string,
   permissionId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('role_permissions')
-    .delete()
-    .eq('role_id', roleId)
-    .eq('permission_id', permissionId);
-
-  if (error) {
-    throw new Error(`Failed to remove permission: ${error.message}`);
-  }
+  await query(
+    `DELETE FROM login.role_permissions
+     WHERE role_id = $1 AND permission_id = $2`,
+    [roleId, permissionId]
+  );
 }
 
 /**
@@ -203,20 +158,15 @@ export async function assignRoleToUser(
   roleId: string,
   assignedBy?: string
 ): Promise<void> {
-  // Use upsert to replace existing role
-  const { error } = await supabase
-    .from('user_roles')
-    .upsert({
-      user_id: userId,
-      role_id: roleId,
-      assigned_by: assignedBy || null,
-    }, {
-      onConflict: 'user_id',
-    });
-
-  if (error) {
-    throw new Error(`Failed to assign role: ${error.message}`);
-  }
+  await query(
+    `INSERT INTO login.user_roles (user_id, role_id, assigned_by)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (user_id) DO UPDATE SET
+       role_id = EXCLUDED.role_id,
+       assigned_by = EXCLUDED.assigned_by,
+       assigned_at = (NOW() AT TIME ZONE 'UTC')`,
+    [userId, roleId, assignedBy ?? null]
+  );
 }
 
 /**
@@ -225,14 +175,11 @@ export async function assignRoleToUser(
 export async function removeRoleFromUser(
   userId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('user_roles')
-    .delete()
-    .eq('user_id', userId);
-
-  if (error) {
-    throw new Error(`Failed to remove role: ${error.message}`);
-  }
+  await query(
+    `DELETE FROM login.user_roles
+     WHERE user_id = $1`,
+    [userId]
+  );
 }
 
 /**
@@ -243,19 +190,19 @@ export async function grantPermissionToUser(
   permissionId: string,
   grantedBy?: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('user_permissions')
-    .insert({
-      user_id: userId,
-      permission_id: permissionId,
-      granted_by: grantedBy || null,
-    });
-
-  if (error) {
-    if (error.code === '23505') {
+  try {
+    await query(
+      `INSERT INTO login.user_permissions (user_id, permission_id, granted_by)
+       VALUES ($1, $2, $3)`,
+      [userId, permissionId, grantedBy ?? null]
+    );
+  } catch (err) {
+    if (isPgUniqueViolation(err)) {
       throw new Error('Permission already granted to user');
     }
-    throw new Error(`Failed to grant permission: ${error.message}`);
+    throw err instanceof Error
+      ? new Error(`Failed to grant permission: ${err.message}`)
+      : new Error('Failed to grant permission');
   }
 }
 
@@ -266,43 +213,23 @@ export async function revokePermissionFromUser(
   userId: string,
   permissionId: string
 ): Promise<void> {
-  const { error } = await supabase
-    .from('user_permissions')
-    .delete()
-    .eq('user_id', userId)
-    .eq('permission_id', permissionId);
-
-  if (error) {
-    throw new Error(`Failed to revoke permission: ${error.message}`);
-  }
+  await query(
+    `DELETE FROM login.user_permissions
+     WHERE user_id = $1 AND permission_id = $2`,
+    [userId, permissionId]
+  );
 }
 
 /**
  * Get direct permissions for a user
  */
 export async function getUserDirectPermissions(userId: string): Promise<Permission[]> {
-  const { data, error } = await supabase
-    .from('user_permissions')
-    .select(`
-      permission_id,
-      permissions!inner(
-        id,
-        resource,
-        action,
-        description,
-        created_at
-      )
-    `)
-    .eq('user_id', userId);
-
-  if (error) {
-    throw new Error(`Failed to fetch user direct permissions: ${error.message}`);
-  }
-
-  return (
-    (data as PermissionJoinRow[] | null | undefined)
-      ?.map((up) => normalizePermission(up.permissions))
-      .filter((p): p is Permission => Boolean(p)) || []
+  return await query<Permission>(
+    `SELECT p.id, p.resource, p.action, p.description, p.created_at
+     FROM login.user_permissions up
+     JOIN login.permissions p ON p.id = up.permission_id
+     WHERE up.user_id = $1`,
+    [userId]
   );
 }
 
