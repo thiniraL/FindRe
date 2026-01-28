@@ -22,6 +22,7 @@ async function sendEmail(to: string, subject: string, text: string, html: string
   const transporter = getSmtpTransporter();
   const from = getFromEmail();
 
+  console.info('Sending email', { to, from, subject });
   await transporter.sendMail({
     from,
     to,
@@ -29,6 +30,7 @@ async function sendEmail(to: string, subject: string, text: string, html: string
     text,
     html,
   });
+  console.info('Email sent', { to, subject });
 }
 
 export async function sendVerificationEmail(to: string, token: string): Promise<void> {

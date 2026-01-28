@@ -136,10 +136,10 @@ export function withRateLimit(options: RateLimitOptions) {
  */
 export const rateLimits = {
   // Authentication endpoints - stricter limits
-  auth: { limit: 5, windowMs: 15 * 60 * 1000 }, // 5 requests per 15 minutes
-  login: { limit: 5, windowMs: 15 * 60 * 1000 }, // 5 requests per 15 minutes
-  register: { limit: 3, windowMs: 60 * 60 * 1000 }, // 3 requests per hour
-  passwordReset: { limit: 3, windowMs: 60 * 60 * 1000 }, // 3 requests per hour
+  auth: { limit: 20, windowMs: 15 * 60 * 1000 }, // 20 requests per 15 minutes
+  login: { limit: 20, windowMs: 15 * 60 * 1000 }, // 20 requests per 15 minutes
+  register: { limit: 20, windowMs: 60 * 60 * 1000 }, // 20 requests per hour
+  passwordReset: { limit: 20, windowMs: 60 * 60 * 1000 }, // 20 requests per hour
 
   // General API endpoints
   default: { limit: 100, windowMs: 60 * 1000 }, // 100 requests per minute

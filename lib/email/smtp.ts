@@ -25,6 +25,7 @@ export function getSmtpTransporter(): Transporter {
   const user = getRequiredEnv('SMTP_USER');
   const pass = getRequiredEnv('SMTP_PASSWORD');
 
+  console.info('Initializing SMTP transporter', { host, port, user });
   cachedTransporter = nodemailer.createTransport({
     host,
     port,

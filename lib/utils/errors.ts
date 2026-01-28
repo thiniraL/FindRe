@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { ZodError } from 'zod';
 
 export type ApiError = {
   message: string;
@@ -19,6 +20,22 @@ export class AppError extends Error {
 }
 
 export function createErrorResponse(error: unknown): NextResponse {
+  if (error instanceof ZodError) {
+    return NextResponse.json(
+      {
+        error: {
+          message: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: error.issues.map((issue) => ({
+            path: issue.path.join('.'),
+            message: issue.message,
+          })),
+        },
+      },
+      { status: 400 }
+    );
+  }
+
   if (error instanceof AppError) {
     return NextResponse.json(
       {
