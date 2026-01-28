@@ -31,12 +31,8 @@ cp env.example .env
 Fill in your Supabase credentials and JWT secrets. See `env.example` for all required variables.
 
 3. Run database migrations:
-- Open Supabase SQL Editor (or connect with any Postgres client)
-- Execute `Doc/mvp.sql` to create all tables, indexes, triggers, and seed data
-
-Important: `Doc/mvp.sql` uses multiple Postgres schemas (`login`, `master`, `property`, `business`, `user_activity`).
-This backend connects directly to Postgres via `DATABASE_URL` (no Supabase REST/PostgREST), so you do **not**
-need to configure **Exposed schemas** in the Supabase Dashboard.
+- Open Supabase SQL Editor
+- Execute `mvp.sql` to create all tables, indexes, triggers, and seed data
 
 4. Run the development server:
 ```bash
@@ -46,6 +42,8 @@ npm run dev
 ## Environment Variables
 
 - `DATABASE_URL` - Supabase PostgreSQL connection string
+- `NEXT_PUBLIC_SUPABASE_URL` - Supabase project URL
+- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key
 - `JWT_SECRET` - JWT signing secret (min 32 chars)
 - `JWT_REFRESH_SECRET` - Refresh token secret (min 32 chars)
 - `JWT_ACCESS_EXPIRY` - Access token expiry (default: 15m)

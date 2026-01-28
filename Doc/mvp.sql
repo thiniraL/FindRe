@@ -145,6 +145,21 @@ CREATE INDEX IF NOT EXISTS idx_user_permissions_user_id ON login.user_permission
 CREATE INDEX IF NOT EXISTS idx_user_permissions_permission_id ON login.user_permissions(permission_id);
 CREATE INDEX IF NOT EXISTS idx_user_permissions_granted_by ON login.user_permissions(granted_by);
 
+-- User-Identities table (external auth providers)
+CREATE TABLE IF NOT EXISTS login.user_identities (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES login.users(id) ON DELETE CASCADE,
+    provider VARCHAR(50) NOT NULL,
+    provider_user_id VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC') NOT NULL,
+    CONSTRAINT unique_provider_user UNIQUE (provider, provider_user_id)
+);
+
+-- Indexes for user_identities table
+CREATE INDEX IF NOT EXISTS idx_user_identities_user_id ON login.user_identities(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_identities_provider ON login.user_identities(provider);
+
 -- Refresh tokens table
 CREATE TABLE IF NOT EXISTS login.refresh_tokens (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

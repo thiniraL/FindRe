@@ -20,6 +20,12 @@ export const loginSchema = z.object({
   sessionId: z.string().optional(), // For linking anonymous session
 });
 
+export const googleLoginSchema = z.object({
+  idToken: z.string().min(1, 'ID token is required'),
+  deviceId: z.string().optional(),
+  sessionId: z.string().optional(), // For linking anonymous session
+});
+
 export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token is required'),
 });
