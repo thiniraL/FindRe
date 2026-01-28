@@ -11,6 +11,7 @@ import { linkSessionToUser, createOrUpdateUserSession } from '@/lib/db/queries/s
 import { getUserIdentityByProvider, upsertUserIdentity } from '@/lib/db/queries/identities';
 import { withRateLimit, rateLimits } from '@/lib/security/rate-limit';
 import * as crypto from 'crypto';
+import { User } from '@/lib/types/auth';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
@@ -70,10 +71,13 @@ async function handler(request: NextRequest) {
     const acceptLanguage = request.headers.get('accept-language') || 'en';
     const detectedLanguage = acceptLanguage.split(',')[0]?.split('-')[0] || 'en';
 
-    let user = await getUserByEmail(email);
-    if (!user) {
+    const existingUser = await getUserByEmail(email);
+    let user: User;
+    if (!existingUser) {
       const tempPassword = crypto.randomUUID();
       user = await createUser(email, tempPassword, detectedLanguage);
+    } else {
+      user = existingUser;
     }
 
     if (!user.is_active) {

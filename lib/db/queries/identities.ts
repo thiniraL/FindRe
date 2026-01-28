@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/db/client';
+import { getSupabaseClient } from '@/lib/db/client';
 
 export type UserIdentityInput = {
   userId: string;
@@ -22,6 +22,7 @@ export async function getUserIdentityByProvider(
   provider: string,
   providerUserId: string
 ): Promise<UserIdentity | null> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('user_identities')
     .select('id, user_id, provider, provider_user_id, email')
@@ -48,6 +49,7 @@ export async function upsertUserIdentity({
   providerUserId,
   email,
 }: UserIdentityInput): Promise<void> {
+  const supabase = getSupabaseClient();
   const { error } = await supabase
     .from('user_identities')
     .upsert(

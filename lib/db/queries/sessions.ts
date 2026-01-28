@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/db/client';
+import { getSupabaseClient } from '@/lib/db/client';
 import { UserSession } from '@/lib/types/auth';
 
 /**
@@ -15,6 +15,7 @@ export async function createOrUpdateUserSession(
     preferredLanguageCode?: string | null;
   }
 ): Promise<UserSession> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('user_sessions')
     .upsert({
@@ -44,6 +45,7 @@ export async function createOrUpdateUserSession(
  * Get user session by session ID
  */
 export async function getUserSession(sessionId: string): Promise<UserSession | null> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('user_sessions')
     .select('*')
@@ -68,7 +70,13 @@ export async function linkSessionToUser(
   userId: string,
   preferredLanguageCode?: string
 ): Promise<UserSession> {
-  const updateData: any = {
+  const supabase = getSupabaseClient();
+  const updateData: {
+    user_id: string;
+    last_activity_at: string;
+    preferred_language_code?: string;
+    language_code?: string;
+  } = {
     user_id: userId,
     last_activity_at: new Date().toISOString(),
   };
@@ -100,6 +108,7 @@ export async function updateSessionLanguagePreference(
   sessionId: string,
   languageCode: string
 ): Promise<UserSession> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('user_sessions')
     .update({
@@ -125,6 +134,7 @@ export async function syncUserSessionsLanguage(
   userId: string,
   languageCode: string
 ): Promise<void> {
+  const supabase = getSupabaseClient();
   const { error } = await supabase
     .from('user_sessions')
     .update({
@@ -144,6 +154,7 @@ export async function syncUserSessionsLanguage(
  * Update session last activity
  */
 export async function updateSessionActivity(sessionId: string): Promise<void> {
+  const supabase = getSupabaseClient();
   const { error } = await supabase
     .from('user_sessions')
     .update({
@@ -161,6 +172,7 @@ export async function updateSessionActivity(sessionId: string): Promise<void> {
  * Get all active sessions for a user
  */
 export async function getUserSessions(userId: string): Promise<UserSession[]> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('user_sessions')
     .select('*')
@@ -179,6 +191,7 @@ export async function getUserSessions(userId: string): Promise<UserSession[]> {
  * Deactivate session
  */
 export async function deactivateSession(sessionId: string): Promise<void> {
+  const supabase = getSupabaseClient();
   const { error } = await supabase
     .from('user_sessions')
     .update({

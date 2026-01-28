@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { createUser } from '@/lib/db/queries/users';
+import { createUserWithVerificationToken } from '@/lib/db/queries/users';
 import { generateTokens } from '@/lib/auth/jwt';
 import { createRefreshToken } from '@/lib/db/queries/tokens';
 import { assignRoleToUser, getRoleByName } from '@/lib/db/queries/roles';
@@ -55,7 +55,7 @@ async function handler(request: NextRequest) {
     const preferredLanguageCode = body.preferredLanguageCode || detectedLanguage || 'en';
 
     // Create user with language preference
-    const { user, emailVerificationToken } = await createUser(
+    const { user, emailVerificationToken } = await createUserWithVerificationToken(
       body.email,
       body.password,
       preferredLanguageCode

@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/db/client';
+import { getSupabaseClient } from '@/lib/db/client';
 import { User, UserWithPassword } from '@/lib/types/auth';
 import { hashPassword, generateToken } from '@/lib/auth/password';
 
@@ -10,6 +10,7 @@ export async function createUser(
   password: string,
   preferredLanguageCode?: string
 ): Promise<User> {
+  const supabase = getSupabaseClient();
   const passwordHash = await hashPassword(password);
   const emailVerificationToken = generateToken();
 
@@ -34,13 +35,50 @@ export async function createUser(
 
   // Remove password_hash from returned data
   const { password_hash, ...user } = data;
+  void password_hash;
   return user as User;
+}
+
+/**
+ * Create user and return verification token for email sending
+ */
+export async function createUserWithVerificationToken(
+  email: string,
+  password: string,
+  preferredLanguageCode?: string
+): Promise<{ user: User; emailVerificationToken: string }> {
+  const supabase = getSupabaseClient();
+  const passwordHash = await hashPassword(password);
+  const emailVerificationToken = generateToken();
+
+  const { data, error } = await supabase
+    .from('users')
+    .insert({
+      email: email.toLowerCase().trim(),
+      password_hash: passwordHash,
+      email_verification_token: emailVerificationToken,
+      preferred_language_code: preferredLanguageCode || 'en',
+    })
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error('Email already exists');
+    }
+    throw new Error(`Failed to create user: ${error.message}`);
+  }
+
+  const { password_hash, ...user } = data;
+  void password_hash;
+  return { user: user as User, emailVerificationToken };
 }
 
 /**
  * Get user by ID
  */
 export async function getUserById(userId: string): Promise<User | null> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('users')
     .select('id, email, email_verified, two_factor_enabled, last_login, is_active, preferred_language_code, created_at, updated_at')
@@ -61,6 +99,7 @@ export async function getUserById(userId: string): Promise<User | null> {
  * Get user by email (with password hash for authentication)
  */
 export async function getUserByEmail(email: string): Promise<UserWithPassword | null> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('users')
     .select('*')
@@ -84,6 +123,7 @@ export async function updateUser(
   userId: string,
   updates: Partial<User>
 ): Promise<User> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('users')
     .update(updates)
@@ -102,6 +142,7 @@ export async function updateUser(
  * Verify user email
  */
 export async function verifyUserEmail(token: string): Promise<User> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('users')
     .update({
@@ -127,6 +168,7 @@ export async function setPasswordResetToken(
   token: string,
   expiresAt: Date
 ): Promise<void> {
+  const supabase = getSupabaseClient();
   const { error } = await supabase
     .from('users')
     .update({
@@ -141,12 +183,34 @@ export async function setPasswordResetToken(
 }
 
 /**
+ * Set email verification token (for resend verification)
+ */
+export async function setEmailVerificationToken(
+  email: string,
+  token: string
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from('users')
+    .update({
+      email_verification_token: token,
+      email_verified: false,
+    })
+    .eq('email', email.toLowerCase().trim());
+
+  if (error) {
+    throw new Error(`Failed to set email verification token: ${error.message}`);
+  }
+}
+
+/**
  * Reset password using token
  */
 export async function resetPassword(
   token: string,
   newPassword: string
 ): Promise<User> {
+  const supabase = getSupabaseClient();
   const passwordHash = await hashPassword(newPassword);
 
   const { data, error } = await supabase
@@ -172,6 +236,7 @@ export async function resetPassword(
  * Update last login timestamp
  */
 export async function updateLastLogin(userId: string): Promise<void> {
+  const supabase = getSupabaseClient();
   await supabase
     .from('users')
     .update({ last_login: new Date().toISOString() })
@@ -185,6 +250,7 @@ export async function updateUserLanguagePreference(
   userId: string,
   languageCode: string
 ): Promise<User> {
+  const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from('users')
     .update({ preferred_language_code: languageCode })
@@ -197,5 +263,22 @@ export async function updateUserLanguagePreference(
   }
 
   return data as User;
+}
+
+/**
+ * List all users (admin use)
+ */
+export async function getAllUsers(): Promise<User[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, email, email_verified, two_factor_enabled, last_login, is_active, preferred_language_code, created_at, updated_at')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to fetch users: ${error.message}`);
+  }
+
+  return (data || []) as User[];
 }
 
