@@ -1,4 +1,4 @@
-import { getSupabaseClient } from '@/lib/db/client';
+import { query } from '@/lib/db/client';
 import { RefreshToken } from '@/lib/types/auth';
 
 /**
@@ -12,77 +12,61 @@ export async function createRefreshToken(
   ipAddress?: string,
   userAgent?: string
 ): Promise<RefreshToken> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('refresh_tokens')
-    .insert({
-      user_id: userId,
+  const result = await query<RefreshToken>(
+    `INSERT INTO login.refresh_tokens
+     (user_id, token, expires_at, device_id, ip_address, user_agent)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [
+      userId,
       token,
-      expires_at: expiresAt.toISOString(),
-      device_id: deviceId || null,
-      ip_address: ipAddress || null,
-      user_agent: userAgent || null,
-    })
-    .select()
-    .single();
+      expiresAt.toISOString(),
+      deviceId || null,
+      ipAddress || null,
+      userAgent || null,
+    ]
+  );
 
-  if (error) {
-    throw new Error(`Failed to create refresh token: ${error.message}`);
-  }
-
-  return data as RefreshToken;
+  return result.rows[0];
 }
 
 /**
  * Get refresh token record
  */
 export async function getRefreshToken(token: string): Promise<RefreshToken | null> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('refresh_tokens')
-    .select('*')
-    .eq('token', token)
-    .is('revoked_at', null)
-    .gt('expires_at', new Date().toISOString())
-    .single();
+  const result = await query<RefreshToken>(
+    `SELECT *
+     FROM login.refresh_tokens
+     WHERE token = $1
+       AND revoked_at IS NULL
+       AND expires_at > NOW()`,
+    [token]
+  );
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch refresh token: ${error.message}`);
-  }
-
-  return data as RefreshToken;
+  return result.rows[0] || null;
 }
 
 /**
  * Revoke refresh token
  */
 export async function revokeRefreshToken(token: string): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('refresh_tokens')
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('token', token);
-
-  if (error) {
-    throw new Error(`Failed to revoke refresh token: ${error.message}`);
-  }
+  await query(
+    `UPDATE login.refresh_tokens
+     SET revoked_at = NOW()
+     WHERE token = $1`,
+    [token]
+  );
 }
 
 /**
  * Revoke all refresh tokens for a user
  */
 export async function revokeAllUserRefreshTokens(userId: string): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('refresh_tokens')
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('user_id', userId)
-    .is('revoked_at', null);
-
-  if (error) {
-    throw new Error(`Failed to revoke user refresh tokens: ${error.message}`);
-  }
+  await query(
+    `UPDATE login.refresh_tokens
+     SET revoked_at = NOW()
+     WHERE user_id = $1
+       AND revoked_at IS NULL`,
+    [userId]
+  );
 }

@@ -1,66 +1,42 @@
-import { getSupabaseClient } from '@/lib/db/client';
+import { query } from '@/lib/db/client';
 import { Permission, Role } from '@/lib/types/auth';
 
 export async function getUserRole(userId: string): Promise<Role | null> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('user_roles')
-    .select('role:roles(id, name, description, is_system, created_at, updated_at)')
-    .eq('user_id', userId)
-    .single();
+  const result = await query<Role>(
+    `SELECT r.*
+     FROM login.user_roles ur
+     JOIN login.roles r ON r.id = ur.role_id
+     WHERE ur.user_id = $1
+     LIMIT 1`,
+    [userId]
+  );
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch user role: ${error.message}`);
-  }
-
-  const row = data as
-    | { role: Role | null }
-    | { role: Role[] }
-    | null;
-  if (!row) {
-    return null;
-  }
-  if (Array.isArray(row.role)) {
-    return row.role[0] || null;
-  }
-  return row.role || null;
+  return result.rows[0] || null;
 }
 
 export async function getUserPermissions(userId: string): Promise<Permission[]> {
-  const supabase = getSupabaseClient();
   const rolePromise = getUserRole(userId);
-  const directPromise = supabase
-    .from('user_permissions')
-    .select('permission:permissions(id, resource, action, description, created_at)')
-    .eq('user_id', userId);
+  const directPromise = query<Permission>(
+    `SELECT p.*
+     FROM login.user_permissions up
+     JOIN login.permissions p ON p.id = up.permission_id
+     WHERE up.user_id = $1`,
+    [userId]
+  );
 
   const [role, directResult] = await Promise.all([rolePromise, directPromise]);
-
-  if (directResult.error) {
-    throw new Error(`Failed to fetch direct permissions: ${directResult.error.message}`);
-  }
-
-  const directPermissions = ((directResult.data || []) as Array<{
-    permission: Permission | Permission[];
-  }>).flatMap((row) => (Array.isArray(row.permission) ? row.permission : [row.permission]));
+  const directPermissions = directResult.rows;
   let rolePermissions: Permission[] = [];
 
   if (role?.id) {
-    const { data, error } = await supabase
-      .from('role_permissions')
-      .select('permission:permissions(id, resource, action, description, created_at)')
-      .eq('role_id', role.id);
-
-    if (error) {
-      throw new Error(`Failed to fetch role permissions: ${error.message}`);
-    }
-
-    rolePermissions = ((data || []) as Array<{ permission: Permission | Permission[] }>).flatMap(
-      (row) => (Array.isArray(row.permission) ? row.permission : [row.permission])
+    const roleResult = await query<Permission>(
+      `SELECT p.*
+       FROM login.role_permissions rp
+       JOIN login.permissions p ON p.id = rp.permission_id
+       WHERE rp.role_id = $1`,
+      [role.id]
     );
+    rolePermissions = roleResult.rows;
   }
 
   const unique = new Map<string, Permission>();

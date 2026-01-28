@@ -1,6 +1,6 @@
 # FindRE - Real Estate Platform Backend
 
-Large-scale real estate platform backend built with Next.js App Router, custom authentication, and Supabase PostgreSQL.
+Large-scale real estate platform backend built with Next.js App Router, custom authentication, and PostgreSQL (via `pg`).
 
 ## Features
 
@@ -28,11 +28,10 @@ cp env.example .env
 # Or manually copy env.example to .env
 ```
 
-Fill in your Supabase credentials and JWT secrets. See `env.example` for all required variables.
+Fill in your PostgreSQL connection string and JWT secrets. See `env.example` for all required variables.
 
 3. Run database migrations:
-- Open Supabase SQL Editor
-- Execute `mvp.sql` to create all tables, indexes, triggers, and seed data
+- Run `mvp.sql` against your PostgreSQL database to create all tables, indexes, triggers, and seed data
 
 4. Run the development server:
 ```bash
@@ -41,9 +40,7 @@ npm run dev
 
 ## Environment Variables
 
-- `DATABASE_URL` - Supabase PostgreSQL connection string
-- `NEXT_PUBLIC_SUPABASE_URL` - Supabase project URL
-- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key
+- `DATABASE_URL` - PostgreSQL connection string
 - `JWT_SECRET` - JWT signing secret (min 32 chars)
 - `JWT_REFRESH_SECRET` - Refresh token secret (min 32 chars)
 - `JWT_ACCESS_EXPIRY` - Access token expiry (default: 15m)

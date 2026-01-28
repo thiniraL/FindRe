@@ -1,103 +1,77 @@
-import { getSupabaseClient } from '@/lib/db/client';
+import { query } from '@/lib/db/client';
 import { Role, Permission } from '@/lib/types/auth';
 
 export async function getAllRoles(): Promise<Role[]> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('roles')
-    .select('*')
-    .order('name', { ascending: true });
-
-  if (error) {
-    throw new Error(`Failed to fetch roles: ${error.message}`);
-  }
-
-  return (data || []) as Role[];
+  const result = await query<Role>(
+    'SELECT * FROM login.roles ORDER BY name ASC'
+  );
+  return result.rows;
 }
 
 export async function getRoleById(roleId: string): Promise<Role | null> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('roles')
-    .select('*')
-    .eq('id', roleId)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch role: ${error.message}`);
-  }
-
-  return data as Role;
+  const result = await query<Role>(
+    'SELECT * FROM login.roles WHERE id = $1',
+    [roleId]
+  );
+  return result.rows[0] || null;
 }
 
 export async function getRoleByName(name: string): Promise<Role | null> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('roles')
-    .select('*')
-    .eq('name', name)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch role: ${error.message}`);
-  }
-
-  return data as Role;
+  const result = await query<Role>(
+    'SELECT * FROM login.roles WHERE name = $1',
+    [name]
+  );
+  return result.rows[0] || null;
 }
 
 export async function createRole(
   name: string,
   description?: string
 ): Promise<Role> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('roles')
-    .insert({ name, description: description || null })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to create role: ${error.message}`);
-  }
-
-  return data as Role;
+  const result = await query<Role>(
+    `INSERT INTO login.roles (name, description)
+     VALUES ($1, $2)
+     RETURNING *`,
+    [name, description || null]
+  );
+  return result.rows[0];
 }
 
 export async function updateRole(
   roleId: string,
   updates: Partial<Role>
 ): Promise<Role> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('roles')
-    .update(updates)
-    .eq('id', roleId)
-    .select()
-    .single();
+  const fields: Array<keyof Role> = ['name', 'description', 'is_system'];
+  const setParts: string[] = [];
+  const values: Array<string | boolean | null> = [];
 
-  if (error) {
-    throw new Error(`Failed to update role: ${error.message}`);
+  fields.forEach((field) => {
+    const value = updates[field];
+    if (value !== undefined) {
+      setParts.push(`${field} = $${values.length + 1}`);
+      values.push(value as string | boolean | null);
+    }
+  });
+
+  if (setParts.length === 0) {
+    throw new Error('No valid fields to update');
   }
 
-  return data as Role;
+  values.push(roleId);
+
+  const result = await query<Role>(
+    `UPDATE login.roles
+     SET ${setParts.join(', ')}
+     WHERE id = $${values.length}
+     RETURNING *`,
+    values
+  );
+
+  return result.rows[0];
 }
 
 export async function deleteRole(roleId: string): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('roles')
-    .delete()
-    .eq('id', roleId);
-
-  if (error) {
-    throw new Error(`Failed to delete role: ${error.message}`);
-  }
+  await query('DELETE FROM login.roles WHERE id = $1', [roleId]);
 }
 
 export async function assignRoleToUser(
@@ -105,51 +79,31 @@ export async function assignRoleToUser(
   roleId: string,
   assignedBy?: string
 ): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('user_roles')
-    .upsert(
-      {
-        user_id: userId,
-        role_id: roleId,
-        assigned_by: assignedBy || null,
-        assigned_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id' }
-    );
-
-  if (error) {
-    throw new Error(`Failed to assign role: ${error.message}`);
-  }
+  await query(
+    `INSERT INTO login.user_roles (user_id, role_id, assigned_by, assigned_at)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id)
+     DO UPDATE SET role_id = EXCLUDED.role_id,
+                   assigned_by = EXCLUDED.assigned_by,
+                   assigned_at = EXCLUDED.assigned_at`,
+    [userId, roleId, assignedBy || null, new Date().toISOString()]
+  );
 }
 
 export async function removeRoleFromUser(userId: string): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('user_roles')
-    .delete()
-    .eq('user_id', userId);
-
-  if (error) {
-    throw new Error(`Failed to remove role: ${error.message}`);
-  }
+  await query('DELETE FROM login.user_roles WHERE user_id = $1', [userId]);
 }
 
 export async function getUserDirectPermissions(userId: string): Promise<Permission[]> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('user_permissions')
-    .select('permission:permissions(id, resource, action, description, created_at)')
-    .eq('user_id', userId);
-
-  if (error) {
-    throw new Error(`Failed to fetch direct permissions: ${error.message}`);
-  }
-
-  const permissions = ((data || []) as Array<{ permission: Permission | Permission[] }>).flatMap(
-    (row) => (Array.isArray(row.permission) ? row.permission : [row.permission])
+  const result = await query<Permission>(
+    `SELECT p.*
+     FROM login.user_permissions up
+     JOIN login.permissions p ON p.id = up.permission_id
+     WHERE up.user_id = $1`,
+    [userId]
   );
-  return permissions as Permission[];
+
+  return result.rows;
 }
 
 export async function grantPermissionToUser(
@@ -157,36 +111,22 @@ export async function grantPermissionToUser(
   permissionId: string,
   grantedBy?: string
 ): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('user_permissions')
-    .upsert(
-      {
-        user_id: userId,
-        permission_id: permissionId,
-        granted_by: grantedBy || null,
-        granted_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id,permission_id' }
-    );
-
-  if (error) {
-    throw new Error(`Failed to grant permission: ${error.message}`);
-  }
+  await query(
+    `INSERT INTO login.user_permissions (user_id, permission_id, granted_by, granted_at)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id, permission_id)
+     DO UPDATE SET granted_by = EXCLUDED.granted_by,
+                   granted_at = EXCLUDED.granted_at`,
+    [userId, permissionId, grantedBy || null, new Date().toISOString()]
+  );
 }
 
 export async function revokePermissionFromUser(
   userId: string,
   permissionId: string
 ): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('user_permissions')
-    .delete()
-    .eq('user_id', userId)
-    .eq('permission_id', permissionId);
-
-  if (error) {
-    throw new Error(`Failed to revoke permission: ${error.message}`);
-  }
+  await query(
+    'DELETE FROM login.user_permissions WHERE user_id = $1 AND permission_id = $2',
+    [userId, permissionId]
+  );
 }

@@ -1,23 +1,24 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { Pool, type QueryResult, type QueryResultRow } from 'pg';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-let supabaseClient: SupabaseClient | null = null;
+const databaseUrl = process.env.DATABASE_URL;
+let pool: Pool | null = null;
 
-function initSupabaseClient(): SupabaseClient {
-  if (!supabaseUrl || !supabaseServiceRoleKey) {
-    throw new Error('Missing Supabase configuration in environment variables.');
+function getPool(): Pool {
+  if (!databaseUrl) {
+    throw new Error('Missing DATABASE_URL in environment variables.');
   }
 
-  if (!supabaseClient) {
-    supabaseClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { persistSession: false },
-    });
+  if (!pool) {
+    pool = new Pool({ connectionString: databaseUrl });
   }
 
-  return supabaseClient;
+  return pool;
 }
 
-export function getSupabaseClient(): SupabaseClient {
-  return initSupabaseClient();
+export async function query<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params?: Array<string | number | boolean | Date | null>
+): Promise<QueryResult<T>> {
+  const pgPool = getPool();
+  return pgPool.query<T>(text, params);
 }

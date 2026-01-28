@@ -1,4 +1,4 @@
-import { getSupabaseClient } from '@/lib/db/client';
+import { query } from '@/lib/db/client';
 
 export type UserIdentityInput = {
   userId: string;
@@ -22,22 +22,15 @@ export async function getUserIdentityByProvider(
   provider: string,
   providerUserId: string
 ): Promise<UserIdentity | null> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('user_identities')
-    .select('id, user_id, provider, provider_user_id, email')
-    .eq('provider', provider)
-    .eq('provider_user_id', providerUserId)
-    .single();
+  const result = await query<UserIdentity>(
+    `SELECT id, user_id, provider, provider_user_id, email
+     FROM login.user_identities
+     WHERE provider = $1
+       AND provider_user_id = $2`,
+    [provider, providerUserId]
+  );
 
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    throw new Error(`Failed to fetch user identity: ${error.message}`);
-  }
-
-  return data as UserIdentity;
+  return result.rows[0] || null;
 }
 
 /**
@@ -49,21 +42,13 @@ export async function upsertUserIdentity({
   providerUserId,
   email,
 }: UserIdentityInput): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('user_identities')
-    .upsert(
-      {
-        user_id: userId,
-        provider,
-        provider_user_id: providerUserId,
-        email: email || null,
-      },
-      { onConflict: 'provider,provider_user_id' }
-    );
-
-  if (error) {
-    throw new Error(`Failed to upsert user identity: ${error.message}`);
-  }
+  await query(
+    `INSERT INTO login.user_identities (user_id, provider, provider_user_id, email)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (provider, provider_user_id)
+     DO UPDATE SET user_id = EXCLUDED.user_id,
+                   email = EXCLUDED.email`,
+    [userId, provider, providerUserId, email || null]
+  );
 }
 

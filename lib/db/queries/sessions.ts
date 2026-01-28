@@ -1,4 +1,4 @@
-import { getSupabaseClient } from '@/lib/db/client';
+import { query } from '@/lib/db/client';
 import { UserSession } from '@/lib/types/auth';
 
 /**
@@ -15,51 +15,45 @@ export async function createOrUpdateUserSession(
     preferredLanguageCode?: string | null;
   }
 ): Promise<UserSession> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('user_sessions')
-    .upsert({
-      session_id: sessionId,
-      user_id: options.userId || null,
-      ip_address: options.ipAddress || null,
-      user_agent: options.userAgent || null,
-      country_code: options.countryCode || null,
-      language_code: options.languageCode || null,
-      preferred_language_code: options.preferredLanguageCode || null,
-      last_activity_at: new Date().toISOString(),
-      is_active: true,
-    }, {
-      onConflict: 'session_id',
-    })
-    .select()
-    .single();
+  const result = await query<UserSession>(
+    `INSERT INTO user_activity.user_sessions
+     (session_id, user_id, ip_address, user_agent, country_code, language_code, preferred_language_code, last_activity_at, is_active)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+     ON CONFLICT (session_id)
+     DO UPDATE SET user_id = EXCLUDED.user_id,
+                   ip_address = EXCLUDED.ip_address,
+                   user_agent = EXCLUDED.user_agent,
+                   country_code = EXCLUDED.country_code,
+                   language_code = EXCLUDED.language_code,
+                   preferred_language_code = EXCLUDED.preferred_language_code,
+                   last_activity_at = EXCLUDED.last_activity_at,
+                   is_active = EXCLUDED.is_active,
+                   updated_at = NOW()
+     RETURNING *`,
+    [
+      sessionId,
+      options.userId || null,
+      options.ipAddress || null,
+      options.userAgent || null,
+      options.countryCode || null,
+      options.languageCode || null,
+      options.preferredLanguageCode || null,
+      new Date().toISOString(),
+    ]
+  );
 
-  if (error) {
-    throw new Error(`Failed to create/update session: ${error.message}`);
-  }
-
-  return data as UserSession;
+  return result.rows[0];
 }
 
 /**
  * Get user session by session ID
  */
 export async function getUserSession(sessionId: string): Promise<UserSession | null> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('user_sessions')
-    .select('*')
-    .eq('session_id', sessionId)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      return null; // Not found
-    }
-    throw new Error(`Failed to fetch session: ${error.message}`);
-  }
-
-  return data as UserSession;
+  const result = await query<UserSession>(
+    'SELECT * FROM user_activity.user_sessions WHERE session_id = $1',
+    [sessionId]
+  );
+  return result.rows[0] || null;
 }
 
 /**
@@ -70,35 +64,18 @@ export async function linkSessionToUser(
   userId: string,
   preferredLanguageCode?: string
 ): Promise<UserSession> {
-  const supabase = getSupabaseClient();
-  const updateData: {
-    user_id: string;
-    last_activity_at: string;
-    preferred_language_code?: string;
-    language_code?: string;
-  } = {
-    user_id: userId,
-    last_activity_at: new Date().toISOString(),
-  };
+  const result = await query<UserSession>(
+    `UPDATE user_activity.user_sessions
+     SET user_id = $2,
+         last_activity_at = $3,
+         preferred_language_code = COALESCE($4, preferred_language_code),
+         language_code = COALESCE($4, language_code)
+     WHERE session_id = $1
+     RETURNING *`,
+    [sessionId, userId, new Date().toISOString(), preferredLanguageCode || null]
+  );
 
-  // Update preferred language if provided
-  if (preferredLanguageCode) {
-    updateData.preferred_language_code = preferredLanguageCode;
-    updateData.language_code = preferredLanguageCode;
-  }
-
-  const { data, error } = await supabase
-    .from('user_sessions')
-    .update(updateData)
-    .eq('session_id', sessionId)
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to link session to user: ${error.message}`);
-  }
-
-  return data as UserSession;
+  return result.rows[0];
 }
 
 /**
@@ -108,23 +85,17 @@ export async function updateSessionLanguagePreference(
   sessionId: string,
   languageCode: string
 ): Promise<UserSession> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('user_sessions')
-    .update({
-      preferred_language_code: languageCode,
-      language_code: languageCode,
-      last_activity_at: new Date().toISOString(),
-    })
-    .eq('session_id', sessionId)
-    .select()
-    .single();
+  const result = await query<UserSession>(
+    `UPDATE user_activity.user_sessions
+     SET preferred_language_code = $2,
+         language_code = $2,
+         last_activity_at = $3
+     WHERE session_id = $1
+     RETURNING *`,
+    [sessionId, languageCode, new Date().toISOString()]
+  );
 
-  if (error) {
-    throw new Error(`Failed to update session language: ${error.message}`);
-  }
-
-  return data as UserSession;
+  return result.rows[0];
 }
 
 /**
@@ -134,37 +105,31 @@ export async function syncUserSessionsLanguage(
   userId: string,
   languageCode: string
 ): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('user_sessions')
-    .update({
-      preferred_language_code: languageCode,
-      language_code: languageCode,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('user_id', userId)
-    .eq('is_active', true);
-
-  if (error) {
-    throw new Error(`Failed to sync user sessions language: ${error.message}`);
-  }
+  await query(
+    `UPDATE user_activity.user_sessions
+     SET preferred_language_code = $2,
+         language_code = $2,
+         updated_at = NOW()
+     WHERE user_id = $1
+       AND is_active = true`,
+    [userId, languageCode]
+  );
 }
 
 /**
  * Update session last activity
  */
 export async function updateSessionActivity(sessionId: string): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('user_sessions')
-    .update({
-      last_activity_at: new Date().toISOString(),
-    })
-    .eq('session_id', sessionId);
-
-  if (error) {
-    // Don't throw error for activity updates - it's not critical
-    console.error(`Failed to update session activity: ${error.message}`);
+  try {
+    await query(
+      `UPDATE user_activity.user_sessions
+       SET last_activity_at = $2
+       WHERE session_id = $1`,
+      [sessionId, new Date().toISOString()]
+    );
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error(`Failed to update session activity: ${message}`);
   }
 }
 
@@ -172,36 +137,28 @@ export async function updateSessionActivity(sessionId: string): Promise<void> {
  * Get all active sessions for a user
  */
 export async function getUserSessions(userId: string): Promise<UserSession[]> {
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from('user_sessions')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('is_active', true)
-    .order('last_activity_at', { ascending: false });
+  const result = await query<UserSession>(
+    `SELECT *
+     FROM user_activity.user_sessions
+     WHERE user_id = $1
+       AND is_active = true
+     ORDER BY last_activity_at DESC`,
+    [userId]
+  );
 
-  if (error) {
-    throw new Error(`Failed to fetch user sessions: ${error.message}`);
-  }
-
-  return (data || []) as UserSession[];
+  return result.rows;
 }
 
 /**
  * Deactivate session
  */
 export async function deactivateSession(sessionId: string): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { error } = await supabase
-    .from('user_sessions')
-    .update({
-      is_active: false,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('session_id', sessionId);
-
-  if (error) {
-    throw new Error(`Failed to deactivate session: ${error.message}`);
-  }
+  await query(
+    `UPDATE user_activity.user_sessions
+     SET is_active = false,
+         updated_at = NOW()
+     WHERE session_id = $1`,
+    [sessionId]
+  );
 }
 
