@@ -118,6 +118,39 @@ export const featuredQuerySchema = z.object({
   limit: limit ?? 25,
 }));
 
+// Filters by purpose (search filter config)
+export const filtersQuerySchema = z.object({
+  purpose: z.string().min(1, 'purpose is required'),
+  countryId: z.coerce.number().int().min(1).optional(),
+  currencyId: z.coerce.number().int().min(1).optional(),
+  languageCode: z.string().max(5).optional(),
+});
+
+// Search with filter values (Typesense)
+export const searchQuerySchema = z.object({
+  purpose: z.string().min(1, 'purpose is required'),
+  /** Natural language query: parsed into location, beds, baths, price, features, etc. */
+  q: z.string().optional(),
+  countryId: z.coerce.number().int().min(1).optional(),
+  location: z.string().optional(),
+  completionStatus: z.enum(['all', 'ready', 'off_plan']).optional(),
+  propertyTypeIds: z.string().optional(), // comma-separated IDs
+  bedroomsMin: z.coerce.number().int().min(0).optional(),
+  bedroomsMax: z.coerce.number().int().min(0).optional(),
+  bathroomsMin: z.coerce.number().int().min(0).optional(),
+  bathroomsMax: z.coerce.number().int().min(0).optional(),
+  priceMin: z.coerce.number().min(0).optional(),
+  priceMax: z.coerce.number().min(0).optional(),
+  areaMin: z.coerce.number().min(0).optional(),
+  areaMax: z.coerce.number().min(0).optional(),
+  areaUnit: z.enum(['sqm', 'sqft']).optional(),
+  keyword: z.string().optional(),
+  agentId: z.coerce.number().int().min(1).optional(),
+  featureKeys: z.string().optional(), // comma-separated keys
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 export const onboardingPreferencesSchema = z
   .object({
     preferredBedroomsMin: z.number().int().min(0).optional(),
@@ -133,6 +166,10 @@ export const onboardingPreferencesSchema = z
     preferredFeatureIds: z.array(z.number().int().min(1)).optional(),
   })
   .strict();
+
+export const propertyIdSchema = z.object({
+  id: z.coerce.number().int().min(1, 'Property ID must be a positive integer'),
+});
 
 export const propertyViewSchema = z
   .object({
