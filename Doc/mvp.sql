@@ -444,6 +444,9 @@ CREATE TABLE property.PROPERTIES (
     property_type_id INT NOT NULL,
     purpose_id INT NOT NULL,
     location_id INT NOT NULL,
+
+    -- Denormalized human-readable address (optional)
+    address TEXT,
     
     -- Company (who owns this property)
     company_id INT NOT NULL, -- REQUIRED - every property has a company owner
@@ -462,6 +465,11 @@ CREATE TABLE property.PROPERTIES (
     trucheck_date DATE,
     average_rent DECIMAL(15,2),
     is_off_plan BOOLEAN DEFAULT FALSE,
+
+    -- Featured (now stored directly on PROPERTIES; replaces FEATURED_PROPERTIES table)
+    is_featured BOOLEAN DEFAULT FALSE,
+    featured_rank INT,
+
     added_date TIMESTAMP,
     reactivated_date TIMESTAMP,
     created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC'),
@@ -477,6 +485,9 @@ CREATE TABLE property.PROPERTIES (
     CONSTRAINT chk_property_title_translations CHECK (
         title_translations ? 'en' AND -- Must have English
         jsonb_typeof(title_translations) = 'object'
+    ),
+    CONSTRAINT chk_featured_rank_nonnegative CHECK (featured_rank IS NULL OR featured_rank >= 0),
+    CONSTRAINT chk_featured_requires_rank CHECK (is_featured = FALSE OR featured_rank IS NOT NULL)
     )
 );
 
@@ -490,6 +501,11 @@ CREATE TABLE property.PROPERTY_DETAILS (
     bathrooms INT,
     area_sqft DECIMAL(10,2),
     area_sqm DECIMAL(10,2),
+
+    -- Feature keys for this property (stored here, not in PROPERTIES)
+    -- Example: ['air_conditioning','pool']
+    features JSONB DEFAULT '[]'::JSONB,
+
     parking_spaces INT,
     year_built INT,
     floor_number INT,
@@ -589,13 +605,39 @@ CREATE TABLE property.PROPERTY_VIEWS (
     user_agent VARCHAR(500),
     is_liked BOOLEAN DEFAULT FALSE,
     is_disliked BOOLEAN DEFAULT FALSE,
-    feedback_atTIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC'),
+    feedback_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC'),
     
     FOREIGN KEY (property_id) REFERENCES property.PROPERTIES(property_id) ON DELETE CASCADE,
     FOREIGN KEY (session_id) REFERENCES user_activity.USER_SESSIONS(session_id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES login.users(id) ON DELETE SET NULL,
     
     CONSTRAINT chk_view_duration CHECK (view_duration_seconds IS NULL OR view_duration_seconds >= 0)
+);
+
+-- ============================================
+-- TABLE: SEARCH_FILTER_CONFIGS (UI filter configuration, versioned)
+-- Lets the app render filters dynamically per purpose and optional scope.
+-- ============================================
+CREATE TABLE master.SEARCH_FILTER_CONFIGS (
+    config_id BIGSERIAL PRIMARY KEY,
+    purpose_key VARCHAR(50) NOT NULL, -- references PURPOSES.purpose_key
+    country_id INT NULL,
+    currency_id INT NULL,
+    language_code VARCHAR(5) NULL,
+    version INT NOT NULL DEFAULT 1,
+    is_active BOOLEAN DEFAULT TRUE,
+    config_json JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC'),
+    updated_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC'),
+
+    FOREIGN KEY (purpose_key) REFERENCES property.PURPOSES(purpose_key) ON DELETE RESTRICT,
+    FOREIGN KEY (country_id) REFERENCES master.COUNTRIES(country_id) ON DELETE SET NULL,
+    FOREIGN KEY (currency_id) REFERENCES master.CURRENCIES(currency_id) ON DELETE SET NULL,
+    FOREIGN KEY (language_code) REFERENCES master.LANGUAGES(language_code) ON DELETE SET NULL,
+
+    CONSTRAINT chk_search_filter_version CHECK (version >= 1),
+    CONSTRAINT chk_search_filter_config_json CHECK (jsonb_typeof(config_json) = 'object'),
+    CONSTRAINT uq_search_filter_config_scope_version UNIQUE (purpose_key, country_id, currency_id, language_code, version)
 );
 
 -- ============================================
@@ -762,6 +804,7 @@ CREATE INDEX idx_property_search_desc_en ON property.PROPERTIES
 CREATE INDEX idx_bedrooms ON property.PROPERTY_DETAILS(bedrooms);
 CREATE INDEX idx_bathrooms ON property.PROPERTY_DETAILS(bathrooms);
 CREATE INDEX idx_area_sqft ON property.PROPERTY_DETAILS(area_sqft);
+CREATE INDEX idx_property_details_features_gin ON property.PROPERTY_DETAILS USING GIN (features);
 
 -- FEATURES
 CREATE INDEX idx_features_key ON property.FEATURES(feature_key);
@@ -796,22 +839,36 @@ CREATE INDEX idx_property_views_user ON property.PROPERTY_VIEWS(user_id) WHERE u
 CREATE INDEX idx_property_views_time ON property.PROPERTY_VIEWS(viewed_at DESC);
 CREATE INDEX idx_property_views_session_property ON property.PROPERTY_VIEWS(session_id, property_id);
 CREATE INDEX idx_property_views_session_time ON property.PROPERTY_VIEWS(session_id, viewed_at DESC);
+-- Idempotent like/dislike constraints:
+-- - Logged-in users: one row per (property_id, user_id)
+-- - Anonymous users: one row per (property_id, session_id) when user_id is NULL
+CREATE UNIQUE INDEX uq_property_views_property_user
+    ON property.PROPERTY_VIEWS(property_id, user_id)
+    WHERE user_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_property_views_property_session_anonymous
+    ON property.PROPERTY_VIEWS(property_id, session_id)
+    WHERE user_id IS NULL;
+
+-- PROPERTIES: featured lookups (featured sorted by featured_rank)
+CREATE INDEX idx_properties_featured_rank
+    ON property.PROPERTIES(is_featured, featured_rank)
+    WHERE is_featured = TRUE;
+
+-- SEARCH_FILTER_CONFIGS
+CREATE INDEX idx_search_filter_configs_lookup
+    ON master.SEARCH_FILTER_CONFIGS(is_active, purpose_key, country_id, currency_id, language_code, version DESC);
+CREATE INDEX idx_search_filter_configs_active
+    ON master.SEARCH_FILTER_CONFIGS(is_active) WHERE is_active = TRUE;
+CREATE INDEX idx_search_filter_configs_purpose
+    ON master.SEARCH_FILTER_CONFIGS(purpose_key);
+CREATE INDEX idx_search_filter_configs_config_json_gin
+    ON master.SEARCH_FILTER_CONFIGS USING GIN (config_json);
 
 -- USER_PREFERENCES indexes
 CREATE INDEX idx_user_prefs_session ON user_activity.USER_PREFERENCES(session_id);
 CREATE INDEX idx_user_prefs_user ON user_activity.USER_PREFERENCES(user_id) WHERE user_id IS NOT NULL;
 CREATE INDEX idx_user_prefs_ready ON user_activity.USER_PREFERENCES(is_ready_for_recommendations) 
     WHERE is_ready_for_recommendations = TRUE;
-
--- PROPERTY_SEARCH_SCORES indexes (CRITICAL for fast recommendations!)
-CREATE INDEX idx_search_scores_session ON property.PROPERTY_SEARCH_SCORES(session_id) 
-    WHERE session_id IS NOT NULL;
-CREATE INDEX idx_search_scores_user ON property.PROPERTY_SEARCH_SCORES(user_id) 
-    WHERE user_id IS NOT NULL;
-CREATE INDEX idx_search_scores_total ON property.PROPERTY_SEARCH_SCORES(total_recommendation_score DESC);
-CREATE INDEX idx_search_scores_session_total ON property.PROPERTY_SEARCH_SCORES(session_id, total_recommendation_score DESC) 
-    WHERE session_id IS NOT NULL;
-CREATE INDEX idx_search_scores_property ON property.PROPERTY_SEARCH_SCORES(property_id);
 
 -- ============================================================================
 -- TRIGGERS
@@ -873,6 +930,9 @@ CREATE TRIGGER update_agencies_updated_at BEFORE UPDATE ON business.AGENCIES
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_companies_updated_at BEFORE UPDATE ON business.COMPANIES
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_search_filter_configs_updated_at BEFORE UPDATE ON master.SEARCH_FILTER_CONFIGS
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Trigger: Auto-update USER_SESSIONS when property is viewed

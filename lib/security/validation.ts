@@ -107,6 +107,43 @@ export const queryParamsSchema = z.object({
   sortOrder: z.enum(['asc', 'desc']).optional(),
 });
 
+// Featured / onboarding / views schemas
+export const featuredQuerySchema = z.object({
+  countryId: z.coerce.number().int().min(1),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+}).transform(({ countryId, page, limit }) => ({
+  countryId,
+  page: page ?? 1,
+  limit: limit ?? 25,
+}));
+
+export const onboardingPreferencesSchema = z
+  .object({
+    preferredBedroomsMin: z.number().int().min(0).optional(),
+    preferredBedroomsMax: z.number().int().min(0).optional(),
+    preferredBathroomsMin: z.number().int().min(0).optional(),
+    preferredBathroomsMax: z.number().int().min(0).optional(),
+    preferredPriceMin: z.number().min(0).optional(),
+    preferredPriceMax: z.number().min(0).optional(),
+
+    preferredPropertyTypeIds: z.array(z.number().int().min(1)).optional(),
+    preferredLocationIds: z.array(z.number().int().min(1)).optional(),
+    preferredPurposeIds: z.array(z.number().int().min(1)).optional(),
+    preferredFeatureIds: z.array(z.number().int().min(1)).optional(),
+  })
+  .strict();
+
+export const propertyViewSchema = z
+  .object({
+    propertyId: z.number().int().min(1),
+    viewDurationSeconds: z.number().int().min(0).optional(),
+    viewedAt: z.string().datetime().optional(),
+    feedback: z.enum(['like', 'dislike', 'clear']).optional(),
+    analyzeNow: z.boolean().optional(),
+  })
+  .strict();
+
 /**
  * Validate request body against a schema
  */

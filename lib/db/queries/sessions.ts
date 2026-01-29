@@ -20,12 +20,12 @@ export async function createOrUpdateUserSession(
      (session_id, user_id, ip_address, user_agent, country_code, language_code, preferred_language_code, last_activity_at, is_active)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
      ON CONFLICT (session_id)
-     DO UPDATE SET user_id = EXCLUDED.user_id,
-                   ip_address = EXCLUDED.ip_address,
-                   user_agent = EXCLUDED.user_agent,
-                   country_code = EXCLUDED.country_code,
-                   language_code = EXCLUDED.language_code,
-                   preferred_language_code = EXCLUDED.preferred_language_code,
+     DO UPDATE SET user_id = COALESCE(EXCLUDED.user_id, user_activity.user_sessions.user_id),
+                   ip_address = COALESCE(EXCLUDED.ip_address, user_activity.user_sessions.ip_address),
+                   user_agent = COALESCE(EXCLUDED.user_agent, user_activity.user_sessions.user_agent),
+                   country_code = COALESCE(EXCLUDED.country_code, user_activity.user_sessions.country_code),
+                   language_code = COALESCE(EXCLUDED.language_code, user_activity.user_sessions.language_code),
+                   preferred_language_code = COALESCE(EXCLUDED.preferred_language_code, user_activity.user_sessions.preferred_language_code),
                    last_activity_at = EXCLUDED.last_activity_at,
                    is_active = EXCLUDED.is_active,
                    updated_at = NOW()

@@ -17,7 +17,16 @@ function getPool(): Pool {
 
 export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
-  params?: Array<string | number | boolean | Date | null>
+  params?: Array<
+    | string
+    | number
+    | boolean
+    | Date
+    | null
+    | string[]
+    | number[]
+    | boolean[]
+  >
 ): Promise<QueryResult<T>> {
   const pgPool = getPool();
   return pgPool.query<T>(text, params);
