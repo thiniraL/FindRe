@@ -1,24 +1,24 @@
 export type TypesenseField =
   | {
-      name: string;
-      type:
-        | 'string'
-        | 'string[]'
-        | 'int32'
-        | 'int32[]'
-        | 'int64'
-        | 'float'
-        | 'bool'
-        | 'geopoint';
-      facet?: boolean;
-      optional?: boolean;
-      index?: boolean;
-      sort?: boolean;
-    }
+    name: string;
+    type:
+    | 'string'
+    | 'string[]'
+    | 'int32'
+    | 'int32[]'
+    | 'int64'
+    | 'float'
+    | 'bool'
+    | 'geopoint';
+    facet?: boolean;
+    optional?: boolean;
+    index?: boolean;
+    sort?: boolean;
+  }
   | {
-      name: string;
-      type: 'auto';
-    };
+    name: string;
+    type: 'auto';
+  };
 
 export type TypesenseCollectionSchema = {
   name: string;
@@ -82,6 +82,7 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
 
     // Media
     { name: 'primary_image_url', type: 'string', optional: true },
+    { name: 'additional_image_urls', type: 'string[]', optional: true },
 
     // Optional geo
     { name: 'geo', type: 'geopoint', optional: true },

@@ -59,6 +59,7 @@ type TypesensePropertyDoc = {
   area_en?: string;
   community_en?: string;
   primary_image_url?: string;
+  additional_image_urls?: string[];
 };
 
 function toNumber(v: unknown): number | null {
@@ -125,7 +126,8 @@ export async function GET(request: NextRequest) {
               : null,
             isFeatured: Boolean(d.is_featured),
             featuredRank: d.featured_rank ?? null,
-          },
+            additionalImageUrls: d.additional_image_urls ?? [],
+          }
         };
       });
 
@@ -174,6 +176,7 @@ export async function GET(request: NextRequest) {
           agent: d.agent_id
             ? { id: d.agent_id, name: d.agent_name ?? null }
             : null,
+          additionalImageUrls: d.additional_image_urls ?? [],
         },
       };
     });

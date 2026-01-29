@@ -62,6 +62,7 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'community_en', type: 'string', optional: true },
     { name: 'agent_name', type: 'string', optional: true },
     { name: 'primary_image_url', type: 'string', optional: true },
+    { name: 'additional_image_urls', type: 'string[]', optional: true },
     { name: 'geo', type: 'geopoint', optional: true },
   ],
 };
@@ -105,7 +106,29 @@ async function ensureCollection(schema: TypesenseCollectionSchema): Promise<void
   const getRes = await tsFetch(`/collections/${encodeURIComponent(schema.name)}`, {
     method: 'GET',
   });
-  if (getRes.ok) return;
+
+  if (getRes.ok) {
+    // Check if we need to add missing fields (auto-patching)
+    const currentSchema = (await getRes.json()) as any;
+    const currentFields = new Set(currentSchema.fields.map((f: any) => f.name));
+    // Skip 'id' field as it's reserved and handled automatically by Typesense
+    const missingFields = schema.fields.filter((f) => f.name !== 'id' && !currentFields.has(f.name));
+
+    if (missingFields.length > 0) {
+      console.log(`Patching collection ${schema.name} with missing fields:`, missingFields.map(f => f.name));
+      const patchRes = await tsFetch(`/collections/${encodeURIComponent(schema.name)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: missingFields }),
+      });
+      if (!patchRes.ok) {
+        const text = await patchRes.text().catch(() => '');
+        throw new Error(`Typesense patch collection failed: ${schema.name} (${patchRes.status}) ${text}`);
+      }
+    }
+    return;
+  }
+
   if (getRes.status !== 404) {
     throw new Error(`Typesense collection check failed: ${schema.name} (${getRes.status})`);
   }
@@ -175,6 +198,7 @@ type PropertyDoc = {
   area_en: string | null;
   community_en: string | null;
   primary_image_url: string | null;
+  additional_image_urls: string[] | null;
 };
 
 async function importDocs(docs: PropertyDoc[]): Promise<void> {
@@ -190,9 +214,25 @@ async function importDocs(docs: PropertyDoc[]): Promise<void> {
       body,
     }
   );
+
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`Typesense import failed (${res.status}) ${text}`);
+    throw new Error(`Typesense import network error (${res.status}) ${text}`);
+  }
+
+  // Typesense /import returns 200 even if some docs fail. 
+  // Each line in the response is a JSON result for that doc.
+  const resultText = await res.text();
+  const lines = resultText.split('\n').filter(Boolean);
+  const failures = lines
+    .map((line, idx) => ({ res: JSON.parse(line), idx }))
+    .filter((item) => item.res.success === false);
+
+  if (failures.length > 0) {
+    const firstError = failures[0].res.error || 'Unknown error';
+    console.error(`Typesense import had ${failures.length} failures out of ${docs.length}`);
+    console.error('First failure:', JSON.stringify(failures[0]));
+    throw new Error(`Typesense import failed for ${failures.length} docs. First error: ${firstError}`);
   }
 }
 
@@ -253,6 +293,7 @@ serve(async (req) => {
           area_en: string | null;
           community_en: string | null;
           primary_image_url: string | null;
+          additional_image_urls: string[] | null;
           // Deno Postgres returns BIGINT as bigint
           updated_epoch: number | bigint;
         }>(
@@ -300,6 +341,7 @@ serve(async (req) => {
             b.*,
             img.image_url AS primary_image_url,
             feats.features,
+            add_imgs.additional_image_urls,
             EXTRACT(EPOCH FROM b.updated_at)::bigint AS updated_epoch
           FROM base b
           LEFT JOIN LATERAL (
@@ -315,6 +357,18 @@ serve(async (req) => {
               SELECT jsonb_array_elements_text(COALESCE(b.features_jsonb, '[]'::jsonb))
             ) AS features
           ) feats ON TRUE
+          LEFT JOIN LATERAL (
+            -- Fetch up to 5 additional image URLs
+            SELECT ARRAY(
+              SELECT pi.image_url
+              FROM property.PROPERTY_IMAGES pi
+              WHERE pi.property_id = b.property_id
+                -- Exclude primary image if already picked (handle NULL primary)
+                AND pi.image_url IS DISTINCT FROM img.image_url
+              ORDER BY pi.display_order ASC, pi.image_id ASC
+              LIMIT 5
+            ) AS additional_image_urls
+          ) add_imgs ON TRUE
           WHERE EXTRACT(EPOCH FROM b.updated_at)::bigint > $1
           ORDER BY updated_epoch ASC, b.property_id ASC
           LIMIT $2
@@ -339,12 +393,12 @@ serve(async (req) => {
             purpose_id: r.purpose_id,
             purpose_key: r.purpose_key,
             property_type_id: r.property_type_id,
-            price: r.price,
+            price: r.price !== null ? Number(r.price) : null,
             currency_id: r.currency_id,
             bedrooms: r.bedrooms,
             bathrooms: r.bathrooms,
-            area_sqft: r.area_sqft,
-            area_sqm: r.area_sqm,
+            area_sqft: r.area_sqft !== null ? Number(r.area_sqft) : null,
+            area_sqm: r.area_sqm !== null ? Number(r.area_sqm) : null,
             address: r.address,
             features: r.features ?? null,
             agent_id: r.agent_id,
@@ -361,6 +415,7 @@ serve(async (req) => {
             area_en: r.area_en,
             community_en: r.community_en,
             primary_image_url: r.primary_image_url,
+            additional_image_urls: r.additional_image_urls,
           };
         });
 
