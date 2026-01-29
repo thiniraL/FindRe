@@ -67,15 +67,6 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
   ],
 };
 
-const SYNC_STATE_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
-  name: 'sync_state',
-  fields: [
-    { name: 'id', type: 'string' },
-    { name: 'last_synced_at', type: 'int64', sort: true },
-  ],
-  default_sorting_field: 'last_synced_at',
-};
-
 function mustGetEnv(key: string): string {
   const v = Deno.env.get(key);
   if (!v || !v.trim()) throw new Error(`Missing env: ${key}`);
@@ -144,28 +135,44 @@ async function ensureCollection(schema: TypesenseCollectionSchema): Promise<void
   }
 }
 
-async function getLastSyncedAt(): Promise<number> {
-  await ensureCollection(SYNC_STATE_COLLECTION_SCHEMA);
-  const res = await tsFetch(`/collections/sync_state/documents/properties`, { method: 'GET' });
-  if (res.status === 404) return 0;
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Typesense sync_state read failed (${res.status}) ${text}`);
+async function ensureSyncTable(pool: Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.queryArray(`
+      CREATE TABLE IF NOT EXISTS property.TYPESENSE_SYNC_STATE (
+        id TEXT PRIMARY KEY,
+        last_synced_at BIGINT NOT NULL
+      );
+    `);
+  } finally {
+    client.release();
   }
-  const doc = (await res.json()) as { last_synced_at?: number };
-  return typeof doc.last_synced_at === 'number' ? doc.last_synced_at : 0;
 }
 
-async function setLastSyncedAt(epochSeconds: number): Promise<void> {
-  await ensureCollection(SYNC_STATE_COLLECTION_SCHEMA);
-  const res = await tsFetch(`/collections/sync_state/documents`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: 'properties', last_synced_at: epochSeconds }),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Typesense sync_state write failed (${res.status}) ${text}`);
+async function getLastSyncedAt(pool: Pool): Promise<number> {
+  const client = await pool.connect();
+  try {
+    const res = await client.queryObject<{ last_synced_at: string }>(
+      `SELECT last_synced_at FROM property.TYPESENSE_SYNC_STATE WHERE id = 'properties'`
+    );
+    if (!res.rows.length) return 0;
+    return Number(res.rows[0].last_synced_at);
+  } finally {
+    client.release();
+  }
+}
+
+async function setLastSyncedAt(pool: Pool, epochSeconds: number): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.queryArray(
+      `INSERT INTO property.TYPESENSE_SYNC_STATE (id, last_synced_at) 
+       VALUES ('properties', $1) 
+       ON CONFLICT (id) DO UPDATE SET last_synced_at = EXCLUDED.last_synced_at`,
+      [epochSeconds]
+    );
+  } finally {
+    client.release();
   }
 }
 
@@ -246,16 +253,22 @@ serve(async (req) => {
       });
     }
 
+    const url = new URL(req.url);
+    const force = url.searchParams.get('force') === 'true';
+
     const dbUrl = mustGetEnv('SUPABASE_DB_URL');
-    const lastSyncedAt = await getLastSyncedAt();
+    const pool = new Pool(dbUrl, 1, true);
+
+    // Initializations
+    await ensureSyncTable(pool);
+    const lastSyncedAt = force ? 0 : await getLastSyncedAt(pool);
 
     // Batch settings
     const batchSize = 200;
-    let cursor = lastSyncedAt;
+    let cursorTime = lastSyncedAt;
+    let cursorId = 0; // Tie-breaker
     let totalUpserted = 0;
-    let maxSeen = lastSyncedAt;
-
-    const pool = new Pool(dbUrl, 1, true);
+    let maxSeenTime = lastSyncedAt;
 
     // Ensure properties collection exists before first import
     await ensureCollection(PROPERTIES_COLLECTION_SCHEMA);
@@ -369,11 +382,12 @@ serve(async (req) => {
               LIMIT 5
             ) AS additional_image_urls
           ) add_imgs ON TRUE
-          WHERE EXTRACT(EPOCH FROM b.updated_at)::bigint > $1
+          WHERE (EXTRACT(EPOCH FROM b.updated_at)::bigint > $1)
+             OR (EXTRACT(EPOCH FROM b.updated_at)::bigint = $1 AND b.property_id > $3)
           ORDER BY updated_epoch ASC, b.property_id ASC
           LIMIT $2
           `,
-          [cursor, batchSize]
+          [cursorTime, batchSize, cursorId]
         );
 
         const rows = result.rows;
@@ -422,9 +436,12 @@ serve(async (req) => {
         await importDocs(docs);
 
         totalUpserted += docs.length;
-        const batchMax = Math.max(...docs.map((d) => d.updated_at));
-        if (batchMax > maxSeen) maxSeen = batchMax;
-        cursor = batchMax;
+
+        const lastDoc = docs[docs.length - 1];
+        cursorTime = lastDoc.updated_at;
+        cursorId = Number(lastDoc.property_id);
+
+        if (cursorTime > maxSeenTime) maxSeenTime = cursorTime;
       } finally {
         client.release();
       }
@@ -432,15 +449,15 @@ serve(async (req) => {
 
     await pool.end();
 
-    if (maxSeen > lastSyncedAt) {
-      await setLastSyncedAt(maxSeen);
+    if (maxSeenTime > lastSyncedAt) {
+      await setLastSyncedAt(pool, maxSeenTime);
     }
 
     return new Response(
       JSON.stringify({
         ok: true,
         lastSyncedAt,
-        newLastSyncedAt: maxSeen,
+        newLastSyncedAt: maxSeenTime,
         upserted: totalUpserted,
       }),
       { headers: { 'Content-Type': 'application/json' } }

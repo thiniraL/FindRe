@@ -7,6 +7,8 @@ import { validateQuery } from '@/lib/security/validation';
 import { getPreferencesForFeed } from '@/lib/db/queries/preferences';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
 import { typesenseSearch } from '@/lib/search/typesense';
+import { verifyAccessToken } from '@/lib/auth/jwt';
+import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
 
 const feedQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
@@ -29,6 +31,19 @@ function getLanguageCode(request: NextRequest): 'en' | 'ar' {
   const first = acceptLanguage.split(',')[0]?.trim() || 'en';
   const lang = first.split('-')[0]?.trim().toLowerCase() || 'en';
   return lang === 'ar' ? 'ar' : 'en';
+}
+
+function tryGetUserIdFromAuthHeader(request: NextRequest): string | null {
+  const authHeader = request.headers.get('authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.substring(7).trim();
+  if (!token) return null;
+  try {
+    const payload = verifyAccessToken(token);
+    return payload.userId;
+  } catch {
+    return null;
+  }
 }
 
 type TypesensePropertyDoc = {
@@ -75,6 +90,7 @@ function toNumber(v: unknown): number | null {
 export async function GET(request: NextRequest) {
   try {
     const sessionId = getSessionId(request);
+    const userId = tryGetUserIdFromAuthHeader(request);
     const { page: pageRaw, limit: limitRaw, countryId, q, featureKeys } = validateQuery(request, feedQuerySchema);
     const page = pageRaw ?? 1;
     const perPage = limitRaw ?? 25;
@@ -127,8 +143,20 @@ export async function GET(request: NextRequest) {
             isFeatured: Boolean(d.is_featured),
             featuredRank: d.featured_rank ?? null,
             additionalImageUrls: d.additional_image_urls ?? [],
+            isLiked: false,
+            isDisliked: false,
           }
         };
+      });
+
+      const propertyIds = items.map((i) => i.property.id);
+      const viewStatusMap = await getPropertyViewStatus(propertyIds, sessionId, userId);
+      items.forEach((item) => {
+        const status = viewStatusMap.get(item.property.id);
+        if (status) {
+          item.property.isLiked = status.isLiked;
+          item.property.isDisliked = status.isDisliked;
+        }
       });
 
       return createPaginatedResponse(items, page, perPage, resp.found);
@@ -177,8 +205,20 @@ export async function GET(request: NextRequest) {
             ? { id: d.agent_id, name: d.agent_name ?? null }
             : null,
           additionalImageUrls: d.additional_image_urls ?? [],
+          isLiked: false,
+          isDisliked: false,
         },
       };
+    });
+
+    const propertyIds = items.map((i) => i.property.id);
+    const viewStatusMap = await getPropertyViewStatus(propertyIds, sessionId, userId);
+    items.forEach((item) => {
+      const status = viewStatusMap.get(item.property.id);
+      if (status) {
+        item.property.isLiked = status.isLiked;
+        item.property.isDisliked = status.isDisliked;
+      }
     });
 
     return createPaginatedResponse(items, page, perPage, resp.found);

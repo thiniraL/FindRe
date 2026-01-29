@@ -155,6 +155,59 @@ export async function countSessionViews(sessionId: string): Promise<number> {
   return parseInt(res.rows[0]?.c || '0', 10);
 }
 
+
+export async function getPropertyViewStatus(
+  propertyIds: number[],
+  sessionId: string,
+  userId?: string | null
+): Promise<Map<number, { isLiked: boolean; isDisliked: boolean }>> {
+  if (!propertyIds.length) return new Map();
+
+  let rows: { property_id: number; is_liked: boolean; is_disliked: boolean }[];
+
+  if (userId) {
+    const res = await query<{
+      property_id: number;
+      is_liked: boolean;
+      is_disliked: boolean;
+    }>(
+      `
+      SELECT property_id, is_liked, is_disliked
+      FROM property.PROPERTY_VIEWS
+      WHERE user_id = $1
+        AND property_id = ANY($2)
+      `,
+      [userId, propertyIds]
+    );
+    rows = res.rows;
+  } else {
+    const res = await query<{
+      property_id: number;
+      is_liked: boolean;
+      is_disliked: boolean;
+    }>(
+      `
+      SELECT property_id, is_liked, is_disliked
+      FROM property.PROPERTY_VIEWS
+      WHERE session_id = $1
+        AND user_id IS NULL
+        AND property_id = ANY($2)
+      `,
+      [sessionId, propertyIds]
+    );
+    rows = res.rows;
+  }
+
+  const map = new Map<number, { isLiked: boolean; isDisliked: boolean }>();
+  for (const row of rows) {
+    map.set(row.property_id, {
+      isLiked: row.is_liked,
+      isDisliked: row.is_disliked,
+    });
+  }
+  return map;
+}
+
 export async function bumpSessionActivityAndViews(sessionId: string): Promise<void> {
   await query(
     `
@@ -167,4 +220,5 @@ export async function bumpSessionActivityAndViews(sessionId: string): Promise<vo
     [sessionId]
   );
 }
+
 
