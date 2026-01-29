@@ -1,4 +1,6 @@
 import { NextRequest } from 'next/server';
+
+export const dynamic = 'force-dynamic';
 import { z } from 'zod';
 import { AppError, createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors';
 import { validateQuery } from '@/lib/security/validation';
