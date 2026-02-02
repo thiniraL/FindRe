@@ -16,6 +16,15 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Search pipeline (achieved):
+ *   User text (q + explicit params)
+ *     → NLP / Rule parser (parseNaturalLanguageQuery + mergeNaturalLanguageIntoState)
+ *     → Structured query + filters (buildSearchQuery + buildFilterBy)
+ *     → Typesense
+ *     → Results
+ */
+
 const DEFAULT_COUNTRY_ID = 1;
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 25;

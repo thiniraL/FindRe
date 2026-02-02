@@ -25,8 +25,8 @@ export async function countFeaturedProperties(countryId: number): Promise<number
     `
     SELECT COUNT(*)::text AS total
     FROM property.PROPERTIES p
-    JOIN property.LOCATIONS l ON l.location_id = p.location_id
-    WHERE l.country_id = $1
+    LEFT JOIN property.LOCATIONS l ON l.location_id = p.location_id
+    WHERE COALESCE(l.country_id, 1) = $1
       AND p.is_featured = TRUE
     `,
     [countryId]
@@ -61,7 +61,7 @@ export async function getFeaturedProperties(options: {
       a.profile_image_url AS agent_profile_image_url,
       a.profile_slug AS agent_profile_slug
     FROM property.PROPERTIES p
-    JOIN property.LOCATIONS l ON l.location_id = p.location_id
+    LEFT JOIN property.LOCATIONS l ON l.location_id = p.location_id
     LEFT JOIN property.PROPERTY_DETAILS pd ON pd.property_id = p.property_id
     JOIN master.CURRENCIES c ON c.currency_id = p.currency_id
     LEFT JOIN LATERAL (
@@ -72,7 +72,7 @@ export async function getFeaturedProperties(options: {
       LIMIT 1
     ) img ON TRUE
     LEFT JOIN business.AGENTS a ON a.agent_id = p.agent_id
-    WHERE l.country_id = $1
+    WHERE COALESCE(l.country_id, 1) = $1
       AND p.is_featured = TRUE
     ORDER BY p.featured_rank ASC NULLS LAST, p.updated_at DESC
     LIMIT $2

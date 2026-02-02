@@ -129,10 +129,13 @@ export async function GET(request: NextRequest) {
 
       const items = resp.hits.map((h) => {
         const d = h.document;
+        const locationParts = [d.address].filter(Boolean);
+        const location = locationParts.length ? locationParts.join(', ') : null;
         return {
           property: {
             id: Number(d.property_id),
             title: lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
+            location,
             price: d.price ?? null,
             bedrooms: d.bedrooms ?? null,
             bathrooms: d.bathrooms ?? null,
@@ -193,10 +196,13 @@ export async function GET(request: NextRequest) {
 
     const items = resp.hits.map((h) => {
       const d = h.document;
+      const locationParts = [d.address, d.community_en, d.area_en, d.city_en].filter(Boolean);
+      const location = locationParts.length ? locationParts.join(', ') : null;
       return {
         property: {
           id: Number(d.property_id),
           title: lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
+          location,
           price: d.price ?? null,
           bedrooms: d.bedrooms ?? null,
           bathrooms: d.bathrooms ?? null,

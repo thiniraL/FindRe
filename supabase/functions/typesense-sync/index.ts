@@ -276,8 +276,8 @@ serve(async (req) => {
     while (true) {
       const client = await pool.connect();
       try {
-        // NOTE: v1 uses PROPERTIES.updated_at as change source, plus FEATURED_PROPERTIES.updated_at
-        // If you later need “deep” change detection for images/features, switch to an outbox table.
+        // Location: property.address only; LOCATIONS optional (country_id default 1 when null).
+        // Features: PROPERTY_DETAILS.features only; FEATURES/PROPERTY_FEATURES not used.
         const result = await client.queryObject<{
           property_id: number;
           country_id: number;
@@ -314,7 +314,7 @@ serve(async (req) => {
           WITH base AS (
             SELECT
               p.property_id,
-              l.country_id,
+              COALESCE(l.country_id, 1) AS country_id,
               p.purpose_id,
               pur.purpose_key,
               p.property_type_id,
@@ -345,7 +345,7 @@ serve(async (req) => {
               l.translations->'en'->>'area' AS area_en,
               l.translations->'en'->>'community' AS community_en
             FROM property.PROPERTIES p
-            JOIN property.LOCATIONS l ON l.location_id = p.location_id
+            LEFT JOIN property.LOCATIONS l ON l.location_id = p.location_id
             LEFT JOIN property.PROPERTY_DETAILS pd ON pd.property_id = p.property_id
             LEFT JOIN property.PURPOSES pur ON pur.purpose_id = p.purpose_id
             LEFT JOIN business.AGENTS a ON a.agent_id = p.agent_id

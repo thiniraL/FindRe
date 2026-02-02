@@ -112,6 +112,22 @@ All database schema is maintained in `mvp.sql`. This is the main schema file con
   - Supports language detection and preference tracking
   - Tracks view counts and activity timestamps
 
+### Search pipeline
+
+Search follows this flow:
+
+1. **User text** – Free-text query (`q`) and optional explicit params (location, beds, price, etc.).
+2. **NLP / Rule parser** – `parseNaturalLanguageQuery` extracts location, beds, baths, price, features, property-type keywords; `mergeNaturalLanguageIntoState` merges into filter state (explicit params override).
+3. **Structured query + filters** – `buildSearchQuery` produces full-text `q` (location + keyword); `buildFilterBy` produces Typesense `filter_by` (purpose, country, property type, beds, baths, price, area, features, etc.).
+4. **Typesense** – Search runs against the `properties` collection with the built `q` and `filter_by`.
+5. **Results** – Paginated hits are mapped and returned.
+
+Endpoint: `GET /api/search` with query params (e.g. `q`, `purpose`, `location`, `bedroomsMin`, `priceMax`). See `searchQuerySchema` in `lib/security/validation.ts` for supported params.
+
+**Filter sources (current):**
+- **Location** – From `property.PROPERTIES.address` only. Typesense indexes `address` (and optional `city_en`, `area_en`, `community_en` when `property.LOCATIONS` is used). Search/filter do not rely on `property.LOCATIONS`; location is address-based full-text.
+- **Features** – From `property.PROPERTY_DETAILS.features` (JSONB array of string keys, e.g. `["pool","garden"]`). Filter keys (e.g. `pool`, `ac`) must match values stored in that column. `property.FEATURES` and `property.PROPERTY_FEATURES` are not used for search/filter.
+
 ### Property Domain
 
 - **Multi-language**: All property-related content uses JSONB translations

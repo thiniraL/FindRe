@@ -93,8 +93,8 @@ export async function getPropertyById(
         WHERE pi.property_id = p.property_id
       ) AS image_urls
     FROM property.PROPERTIES p
-    JOIN property.LOCATIONS l ON l.location_id = p.location_id
-    JOIN master.COUNTRIES co ON co.country_id = l.country_id
+    LEFT JOIN property.LOCATIONS l ON l.location_id = p.location_id
+    LEFT JOIN master.COUNTRIES co ON co.country_id = COALESCE(l.country_id, 1)
     LEFT JOIN property.PROPERTY_DETAILS pd ON pd.property_id = p.property_id
     JOIN master.CURRENCIES c ON c.currency_id = p.currency_id
     JOIN property.PURPOSES pur ON pur.purpose_id = p.purpose_id

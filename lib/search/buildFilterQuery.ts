@@ -8,7 +8,7 @@ export type SearchFilterState = {
   purpose: string;
   /** Scope */
   countryId?: number;
-  /** Location text → full-text query (address, city, area, community) */
+  /** Location text → full-text query on property.address (and city/area/community when present) */
   location?: string;
   /** Completion: all | ready | off_plan → is_off_plan filter */
   completionStatus?: 'all' | 'ready' | 'off_plan';
@@ -31,7 +31,7 @@ export type SearchFilterState = {
   keyword?: string;
   /** Agent ID */
   agentId?: number;
-  /** Feature keys, e.g. ["pool", "garden"] */
+  /** Feature keys from PROPERTY_DETAILS.features, e.g. ["pool", "garden"] */
   featureKeys?: string[];
 };
 

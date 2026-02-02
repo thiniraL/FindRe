@@ -1,7 +1,7 @@
 /**
  * Natural language query mapping: parse free-text search (e.g. "3 bed villa with pool in Costa Blanca")
  * into structured filter hints aligned with SEARCH_FILTER_CONFIGS and Typesense.
- * Extracted values are merged with explicit API params; explicit params take precedence.
+ * Location is address-based (property.address); features from PROPERTY_DETAILS.features only.
  */
 
 import type { SearchFilterState } from './buildFilterQuery';
@@ -70,6 +70,15 @@ const PROPERTY_TYPE_MAP: Record<string, string> = {
   commercial: 'commercial',
   studio: 'studio',
   studios: 'studio',
+};
+
+/** Canonical property type key → Typesense property_type_id (matches mvp seed order: villa, apartment, townhouse, penthouse, studio). Others left unmapped. */
+const PROPERTY_TYPE_KEY_TO_ID: Record<string, number> = {
+  villa: 1,
+  apartment: 2,
+  townhouse: 3,
+  penthouse: 4,
+  studio: 5,
 };
 
 /** Regex for "N bed(s)/bedroom(s)" and "N bath(s)/bathroom(s)" */
@@ -240,5 +249,11 @@ export function mergeNaturalLanguageIntoState(
     nl.featureKeys.forEach((k) => existing.add(k));
     state.featureKeys = Array.from(existing);
   }
-  // propertyTypeKeywords are not merged into propertyTypeIds here (would need ID lookup)
+  if (nl.propertyTypeKeywords?.length && state.propertyTypeIds == null) {
+    const ids = nl.propertyTypeKeywords
+      .map((k) => PROPERTY_TYPE_KEY_TO_ID[k])
+      .filter((id): id is number => id != null && Number.isFinite(id));
+    const unique = [...new Set(ids)];
+    if (unique.length) state.propertyTypeIds = unique;
+  }
 }
