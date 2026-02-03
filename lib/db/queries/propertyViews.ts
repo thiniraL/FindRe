@@ -8,7 +8,7 @@ export type UpsertPropertyViewInput = {
   viewDurationSeconds?: number;
   ipAddress: string;
   userAgent?: string;
-  feedback?: 'like' | 'dislike' | 'clear';
+  is_like?: boolean;
 };
 
 export type PropertyViewRow = {
@@ -25,18 +25,17 @@ export type PropertyViewRow = {
   feedback_at: string;
 };
 
-function feedbackToFlags(feedback?: 'like' | 'dislike' | 'clear'): {
+function isLikeToFlags(is_like?: boolean): {
   isLiked: boolean | null;
   isDisliked: boolean | null;
 } {
-  if (feedback === 'like') return { isLiked: true, isDisliked: false };
-  if (feedback === 'dislike') return { isLiked: false, isDisliked: true };
-  if (feedback === 'clear') return { isLiked: false, isDisliked: false };
+  if (is_like === true) return { isLiked: true, isDisliked: false };
+  if (is_like === false) return { isLiked: false, isDisliked: true };
   return { isLiked: null, isDisliked: null };
 }
 
 export async function upsertPropertyView(input: UpsertPropertyViewInput): Promise<PropertyViewRow> {
-  const { isLiked, isDisliked } = feedbackToFlags(input.feedback);
+  const { isLiked, isDisliked } = isLikeToFlags(input.is_like);
 
   // Authenticated path (uses partial unique index on (property_id, user_id) WHERE user_id IS NOT NULL)
   if (input.userId) {

@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
       viewDurationSeconds: body.viewDurationSeconds,
       ipAddress,
       userAgent,
-      feedback: body.feedback,
+      is_like: body.is_like,
     });
 
     await bumpSessionActivityAndViews(sessionId);

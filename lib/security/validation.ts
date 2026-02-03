@@ -176,7 +176,7 @@ export const propertyViewSchema = z
     propertyId: z.number().int().min(1),
     viewDurationSeconds: z.number().int().min(0).optional(),
     viewedAt: z.string().datetime().optional(),
-    feedback: z.enum(['like', 'dislike', 'clear']).optional(),
+    is_like: z.boolean().optional(),
     analyzeNow: z.boolean().optional(),
   })
   .strict();
