@@ -126,10 +126,10 @@ export const filtersQuerySchema = z.object({
   languageCode: z.string().max(5).optional(),
 });
 
-// Search with filter values (Typesense)
+// Search with filter values (Typesense). Purpose optional: can be inferred from q (e.g. "selling" → for_sale, "rent" → for_rent).
 export const searchQuerySchema = z.object({
-  purpose: z.string().min(1, 'purpose is required'),
-  /** Natural language query: parsed into location, beds, baths, price, features, etc. */
+  purpose: z.string().min(1).optional(),
+  /** Natural language query: parsed into purpose, location, beds, baths, price, features, etc. */
   q: z.string().optional(),
   countryId: z.coerce.number().int().min(1).optional(),
   location: z.string().optional(),

@@ -146,6 +146,7 @@ export async function GET(request: NextRequest) {
             isFeatured: Boolean(d.is_featured),
             featuredRank: d.featured_rank ?? null,
             additionalImageUrls: d.additional_image_urls ?? [],
+            purposeKey: d.purpose_key ?? null,
             isLiked: false,
             isDisliked: false,
           }
@@ -211,6 +212,7 @@ export async function GET(request: NextRequest) {
             ? { id: d.agent_id, name: d.agent_name ?? null }
             : null,
           additionalImageUrls: d.additional_image_urls ?? [],
+          purposeKey: d.purpose_key ?? null,
           isLiked: false,
           isDisliked: false,
         },

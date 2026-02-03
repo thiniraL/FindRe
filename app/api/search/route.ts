@@ -12,7 +12,11 @@ import {
 import {
   parseNaturalLanguageQuery,
   mergeNaturalLanguageIntoState,
+  PURPOSE_WORDS_SET,
+  SEARCH_STOPWORDS,
 } from '@/lib/search/naturalLanguageQuery';
+import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
+import { verifyAccessToken } from '@/lib/auth/jwt';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,13 +89,35 @@ function getLanguageCode(request: NextRequest): 'en' | 'ar' {
   return lang === 'ar' ? 'ar' : 'en';
 }
 
+function getSessionId(request: NextRequest): string | null {
+  const sessionId = request.headers.get('x-session-id');
+  if (!sessionId?.trim()) return null;
+  return sessionId.trim();
+}
+
+function tryGetUserIdFromAuthHeader(request: NextRequest): string | null {
+  const authHeader = request.headers.get('authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.substring(7).trim();
+  if (!token) return null;
+  try {
+    const payload = verifyAccessToken(token);
+    return payload.userId;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const parsed = validateQuery(request, searchQuerySchema);
     const lang = getLanguageCode(request);
 
+    // Normalize purpose: lowercase, spaces -> underscore (so "For Sale" / "for_sale" match Typesense)
+    const normalizedPurpose = parsed.purpose?.trim().toLowerCase().replace(/\s+/g, '_') ?? '';
+
     const filterState: SearchFilterState = {
-      purpose: parsed.purpose,
+      purpose: normalizedPurpose,
       countryId: parsed.countryId ?? DEFAULT_COUNTRY_ID,
       location: parsed.location,
       completionStatus: parsed.completionStatus,
@@ -116,6 +142,24 @@ export async function GET(request: NextRequest) {
       mergeNaturalLanguageIntoState(filterState, nlMapped);
     }
 
+    // If purpose still empty after NL merge (no param, no purpose word in q), default to for_sale
+    if (!filterState.purpose?.trim()) {
+      filterState.purpose = 'for_sale';
+    }
+
+    // Strip purpose words and generic stopwords from location/keyword so Typesense never requires them
+    const stripStopwords = (s: string | undefined): string | undefined => {
+      if (!s?.trim()) return s;
+      const cleaned = s
+        .split(/\s+/)
+        .filter((w) => !PURPOSE_WORDS_SET.has(w.toLowerCase()) && !SEARCH_STOPWORDS.has(w.toLowerCase()))
+        .join(' ')
+        .trim();
+      return cleaned.length > 0 ? cleaned : undefined;
+    };
+    if (filterState.location) filterState.location = stripStopwords(filterState.location);
+    if (filterState.keyword) filterState.keyword = stripStopwords(filterState.keyword);
+
     // Use location + keyword for full-text q so Typesense matches place/terms, not the whole sentence
     const q = buildSearchQuery(filterState);
     const filterBy = buildFilterBy(filterState);
@@ -132,6 +176,9 @@ export async function GET(request: NextRequest) {
       page,
       perPage,
     });
+
+    const sessionId = getSessionId(request);
+    const userId = tryGetUserIdFromAuthHeader(request);
 
     const items = resp.hits.map((h) => {
       const d = h.document;
@@ -153,9 +200,24 @@ export async function GET(request: NextRequest) {
             ? { id: d.agent_id, name: d.agent_name ?? null }
             : null,
           additionalImageUrls: d.additional_image_urls ?? [],
+          purposeKey: d.purpose_key ?? null,
+          isLiked: false,
+          isDisliked: false,
         },
       };
     });
+
+    if (sessionId) {
+      const propertyIds = items.map((i) => i.property.id);
+      const viewStatusMap = await getPropertyViewStatus(propertyIds, sessionId, userId);
+      items.forEach((item) => {
+        const status = viewStatusMap.get(item.property.id);
+        if (status) {
+          item.property.isLiked = status.isLiked;
+          item.property.isDisliked = status.isDisliked;
+        }
+      });
+    }
 
     return createPaginatedResponse(items, page, perPage, resp.found);
   } catch (error) {

@@ -10,6 +10,8 @@ export type NaturalLanguageMapped = {
   location?: string;
   /** Residual or explicit keyword terms for full-text */
   keyword?: string;
+  /** Inferred from purpose words (selling, rent, etc.) when not provided by API */
+  purpose?: 'for_sale' | 'for_rent';
   bedroomsMin?: number;
   bedroomsMax?: number;
   bathroomsMin?: number;
@@ -80,6 +82,32 @@ const PROPERTY_TYPE_KEY_TO_ID: Record<string, number> = {
   penthouse: 4,
   studio: 5,
 };
+
+/** Words that indicate listing purpose. Stripped from keyword so Typesense isn't required to match them; can infer purpose when not provided. */
+const PURPOSE_WORD_MAP: Record<string, 'for_sale' | 'for_rent'> = {
+  selling: 'for_sale',
+  sale: 'for_sale',
+  buy: 'for_sale',
+  buying: 'for_sale',
+  purchase: 'for_sale',
+  sold: 'for_sale',
+  for_sale: 'for_sale',
+  'for sale': 'for_sale',
+  rent: 'for_rent',
+  renting: 'for_rent',
+  rental: 'for_rent',
+  lease: 'for_rent',
+  leasing: 'for_rent',
+  let: 'for_rent',
+  for_rent: 'for_rent',
+  'for rent': 'for_rent',
+};
+
+/** Set of purpose words/phrases (lowercase) for stripping from q; exported for use in search route. */
+export const PURPOSE_WORDS_SET = new Set<string>(Object.keys(PURPOSE_WORD_MAP));
+
+/** Generic intent words that rarely appear in property docs; stripping them avoids 0 results from Typesense. */
+export const SEARCH_STOPWORDS = new Set<string>(['properties', 'property', 'listings', 'listing', 'list', 'agent']);
 
 /** Regex for "N bed(s)/bedroom(s)" and "N bath(s)/bathroom(s)" */
 const BEDS_REGEX = /\b(\d+)\s*(?:bed|beds|bedroom|bedrooms|br|brs)\b/gi;
@@ -157,6 +185,14 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
       }
     }
   }
+  // Strip purpose words and generic stopwords from location so they aren't sent to Typesense
+  if (result.location) {
+    const locationWords = result.location
+      .split(/\s+/)
+      .filter((w) => !PURPOSE_WORD_MAP[w.toLowerCase()] && !SEARCH_STOPWORDS.has(w.toLowerCase()));
+    const cleaned = locationWords.join(' ').trim();
+    result.location = cleaned.length > 0 ? cleaned : undefined;
+  }
 
   // --- Price: under X, over X, X-Y ---
   PRICE_UNDER_REGEX.lastIndex = 0;
@@ -206,6 +242,15 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   }
   if (typeSet.size) result.propertyTypeKeywords = Array.from(typeSet);
 
+  // --- Purpose words: map to for_sale/for_rent and strip from keyword ---
+  for (const w of words) {
+    const purposeKey = PURPOSE_WORD_MAP[w];
+    if (purposeKey) {
+      result.purpose = purposeKey;
+      break;
+    }
+  }
+
   // --- Residual keyword: strip extracted parts for a cleaner full-text q ---
   BEDS_REGEX.lastIndex = 0;
   BATHS_REGEX.lastIndex = 0;
@@ -221,6 +266,12 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   for (const key of Object.keys(PROPERTY_TYPE_MAP)) {
     residual = residual.replace(new RegExp(`\\b${key.replace(/\s+/g, '\\s+')}\\b`, 'gi'), ' ');
   }
+  for (const key of Object.keys(PURPOSE_WORD_MAP)) {
+    residual = residual.replace(new RegExp(`\\b${key.replace(/\s+/g, '\\s+')}\\b`, 'gi'), ' ');
+  }
+  for (const word of SEARCH_STOPWORDS) {
+    residual = residual.replace(new RegExp(`\\b${word}\\b`, 'gi'), ' ');
+  }
   residual = residual.replace(/\s+/g, ' ').trim();
   if (residual && residual.length > 1) result.keyword = residual;
 
@@ -235,6 +286,7 @@ export function mergeNaturalLanguageIntoState(
   nl: NaturalLanguageMapped
 ): void {
   if (nl.location != null && state.location == null) state.location = nl.location;
+  if (nl.purpose != null && (state.purpose == null || state.purpose === '')) state.purpose = nl.purpose;
   if (nl.keyword != null) {
     state.keyword = state.keyword ? `${state.keyword} ${nl.keyword}` : nl.keyword;
   }
