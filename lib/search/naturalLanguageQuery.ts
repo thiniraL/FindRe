@@ -10,8 +10,6 @@ export type NaturalLanguageMapped = {
   location?: string;
   /** Residual or explicit keyword terms for full-text */
   keyword?: string;
-  /** Inferred from purpose words (selling, rent, etc.) when not provided by API */
-  purpose?: 'for_sale' | 'for_rent';
   bedroomsMin?: number;
   bedroomsMax?: number;
   bathroomsMin?: number;
@@ -242,15 +240,6 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   }
   if (typeSet.size) result.propertyTypeKeywords = Array.from(typeSet);
 
-  // --- Purpose words: map to for_sale/for_rent and strip from keyword ---
-  for (const w of words) {
-    const purposeKey = PURPOSE_WORD_MAP[w];
-    if (purposeKey) {
-      result.purpose = purposeKey;
-      break;
-    }
-  }
-
   // --- Residual keyword: strip extracted parts for a cleaner full-text q ---
   BEDS_REGEX.lastIndex = 0;
   BATHS_REGEX.lastIndex = 0;
@@ -286,7 +275,6 @@ export function mergeNaturalLanguageIntoState(
   nl: NaturalLanguageMapped
 ): void {
   if (nl.location != null && state.location == null) state.location = nl.location;
-  if (nl.purpose != null && (state.purpose == null || state.purpose === '')) state.purpose = nl.purpose;
   if (nl.keyword != null) {
     state.keyword = state.keyword ? `${state.keyword} ${nl.keyword}` : nl.keyword;
   }

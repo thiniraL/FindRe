@@ -151,6 +151,36 @@ export const searchQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
+/** Search request body for POST. Supports arrays for multi-select filters. */
+export const searchBodySchema = z
+  .object({
+    purpose: z.string().min(1).optional(),
+    q: z.string().optional(),
+    countryId: z.coerce.number().int().min(1).optional(),
+    location: z.string().optional(),
+    completionStatus: z.array(z.enum(['ready', 'off_plan'])).optional(),
+    propertyTypeIds: z.array(z.number().int().min(1)).optional(),
+    bedrooms: z.array(z.number().int().min(0)).optional(),
+    bathrooms: z.array(z.number().int().min(1)).optional(),
+    bedroomsMin: z.number().int().min(0).optional(),
+    bedroomsMax: z.number().int().min(0).optional(),
+    bathroomsMin: z.number().int().min(0).optional(),
+    bathroomsMax: z.number().int().min(0).optional(),
+    priceMin: z.number().min(0).optional(),
+    priceMax: z.number().min(0).optional(),
+    areaMin: z.number().min(0).optional(),
+    areaMax: z.number().min(0).optional(),
+    areaUnit: z.enum(['sqm', 'sqft']).optional(),
+    keyword: z.string().optional(),
+    keywords: z.array(z.string()).optional(),
+    agentId: z.number().int().min(1).optional(),
+    agentIds: z.array(z.number().int().min(1)).optional(),
+    featureKeys: z.array(z.string()).optional(),
+    page: z.number().int().min(1).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+  })
+  .strict();
+
 export const onboardingPreferencesSchema = z
   .object({
     preferredBedroomsMin: z.number().int().min(0).optional(),

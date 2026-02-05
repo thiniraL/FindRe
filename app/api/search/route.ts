@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors';
-import { validateQuery } from '@/lib/security/validation';
-import { searchQuerySchema } from '@/lib/security/validation';
+import { validateQuery, validateBody } from '@/lib/security/validation';
+import { searchQuerySchema, searchBodySchema } from '@/lib/security/validation';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
 import { typesenseSearch } from '@/lib/search/typesense';
 import {
@@ -111,7 +111,6 @@ function tryGetUserIdFromAuthHeader(request: NextRequest): string | null {
 export async function GET(request: NextRequest) {
   try {
     const parsed = validateQuery(request, searchQuerySchema);
-    const lang = getLanguageCode(request);
 
     // Normalize purpose: lowercase, spaces -> underscore (so "For Sale" / "for_sale" match Typesense)
     const normalizedPurpose = parsed.purpose?.trim().toLowerCase().replace(/\s+/g, '_') ?? '';
@@ -147,79 +146,136 @@ export async function GET(request: NextRequest) {
       filterState.purpose = 'for_sale';
     }
 
-    // Strip purpose words and generic stopwords from location/keyword so Typesense never requires them
-    const stripStopwords = (s: string | undefined): string | undefined => {
-      if (!s?.trim()) return s;
-      const cleaned = s
-        .split(/\s+/)
-        .filter((w) => !PURPOSE_WORDS_SET.has(w.toLowerCase()) && !SEARCH_STOPWORDS.has(w.toLowerCase()))
-        .join(' ')
-        .trim();
-      return cleaned.length > 0 ? cleaned : undefined;
-    };
-    if (filterState.location) filterState.location = stripStopwords(filterState.location);
-    if (filterState.keyword) filterState.keyword = stripStopwords(filterState.keyword);
-
-    // Use location + keyword for full-text q so Typesense matches place/terms, not the whole sentence
-    const q = buildSearchQuery(filterState);
-    const filterBy = buildFilterBy(filterState);
-
     const page = parsed.page ?? DEFAULT_PAGE;
     const perPage = parsed.limit ?? DEFAULT_LIMIT;
 
-    const resp = await typesenseSearch<TypesensePropertyDoc>({
-      collection: 'properties',
-      q,
-      queryBy: PROPERTIES_QUERY_BY,
-      filterBy: filterBy ?? undefined,
-      sortBy: 'updated_at:desc',
-      page,
-      perPage,
+    const { items, found } = await runSearch(filterState, page, perPage, request);
+    return createPaginatedResponse(items, page, perPage, found);
+  } catch (error) {
+    return createErrorResponse(error);
+  }
+}
+
+function stripStopwords(s: string | undefined): string | undefined {
+  if (!s?.trim()) return s;
+  const cleaned = s
+    .split(/\s+/)
+    .filter((w) => !PURPOSE_WORDS_SET.has(w.toLowerCase()) && !SEARCH_STOPWORDS.has(w.toLowerCase()))
+    .join(' ')
+    .trim();
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+async function runSearch(
+  filterState: SearchFilterState,
+  page: number,
+  perPage: number,
+  request: NextRequest
+): Promise<{ items: Array<{ property: object }>; found: number }> {
+  const lang = getLanguageCode(request);
+  if (filterState.location) filterState.location = stripStopwords(filterState.location);
+  if (filterState.keyword) filterState.keyword = stripStopwords(filterState.keyword);
+
+  const q = buildSearchQuery(filterState);
+  const filterBy = buildFilterBy(filterState);
+
+  const resp = await typesenseSearch<TypesensePropertyDoc>({
+    collection: 'properties',
+    q,
+    queryBy: PROPERTIES_QUERY_BY,
+    filterBy: filterBy ?? undefined,
+    sortBy: 'updated_at:desc',
+    page,
+    perPage,
+  });
+
+  const sessionId = getSessionId(request);
+  const userId = tryGetUserIdFromAuthHeader(request);
+
+  const items = resp.hits.map((h) => {
+    const d = h.document;
+    const locationParts = [d.address].filter(Boolean);
+    const location = locationParts.length ? locationParts.join(', ') : null;
+    return {
+      property: {
+        id: Number(d.property_id),
+        title:
+          lang === 'ar'
+            ? d.title_ar ?? d.title_en ?? null
+            : d.title_en ?? d.title_ar ?? null,
+        location,
+        price: d.price ?? null,
+        bedrooms: d.bedrooms ?? null,
+        bathrooms: d.bathrooms ?? null,
+        primaryImageUrl: d.primary_image_url ?? null,
+        agent: d.agent_id
+          ? { id: d.agent_id, name: d.agent_name ?? null }
+          : null,
+        additionalImageUrls: d.additional_image_urls ?? [],
+        purposeKey: d.purpose_key ?? null,
+        isLiked: false,
+        isDisliked: false,
+      },
+    };
+  });
+
+  if (sessionId) {
+    const propertyIds = items.map((i) => i.property.id);
+    const viewStatusMap = await getPropertyViewStatus(propertyIds, sessionId, userId);
+    items.forEach((item) => {
+      const status = viewStatusMap.get(item.property.id);
+      if (status) {
+        item.property.isLiked = status.isLiked;
+        item.property.isDisliked = status.isDisliked;
+      }
     });
+  }
 
-    const sessionId = getSessionId(request);
-    const userId = tryGetUserIdFromAuthHeader(request);
+  return { items, found: resp.found };
+}
 
-    const items = resp.hits.map((h) => {
-      const d = h.document;
-      const locationParts = [d.address].filter(Boolean);
-      const location = locationParts.length ? locationParts.join(', ') : null;
-      return {
-        property: {
-          id: Number(d.property_id),
-          title:
-            lang === 'ar'
-              ? d.title_ar ?? d.title_en ?? null
-              : d.title_en ?? d.title_ar ?? null,
-          location,
-          price: d.price ?? null,
-          bedrooms: d.bedrooms ?? null,
-          bathrooms: d.bathrooms ?? null,
-          primaryImageUrl: d.primary_image_url ?? null,
-          agent: d.agent_id
-            ? { id: d.agent_id, name: d.agent_name ?? null }
-            : null,
-          additionalImageUrls: d.additional_image_urls ?? [],
-          purposeKey: d.purpose_key ?? null,
-          isLiked: false,
-          isDisliked: false,
-        },
-      };
-    });
+export async function POST(request: NextRequest) {
+  try {
+    const body = await validateBody(request, searchBodySchema);
 
-    if (sessionId) {
-      const propertyIds = items.map((i) => i.property.id);
-      const viewStatusMap = await getPropertyViewStatus(propertyIds, sessionId, userId);
-      items.forEach((item) => {
-        const status = viewStatusMap.get(item.property.id);
-        if (status) {
-          item.property.isLiked = status.isLiked;
-          item.property.isDisliked = status.isDisliked;
-        }
-      });
+    const normalizedPurpose = body.purpose?.trim().toLowerCase().replace(/\s+/g, '_') ?? '';
+
+    const filterState: SearchFilterState = {
+      purpose: normalizedPurpose,
+      countryId: body.countryId ?? DEFAULT_COUNTRY_ID,
+      location: body.location,
+      completionStatuses: body.completionStatus?.length ? body.completionStatus : undefined,
+      propertyTypeIds: body.propertyTypeIds,
+      bedrooms: body.bedrooms?.length ? body.bedrooms : undefined,
+      bathrooms: body.bathrooms?.length ? body.bathrooms : undefined,
+      bedroomsMin: body.bedroomsMin,
+      bedroomsMax: body.bedroomsMax,
+      bathroomsMin: body.bathroomsMin,
+      bathroomsMax: body.bathroomsMax,
+      priceMin: body.priceMin,
+      priceMax: body.priceMax,
+      areaMin: body.areaMin,
+      areaMax: body.areaMax,
+      areaUnit: body.areaUnit ?? 'sqm',
+      keyword: body.keywords?.length ? body.keywords.join(' ') : body.keyword,
+      agentId: body.agentId,
+      agentIds: body.agentIds?.length ? body.agentIds : undefined,
+      featureKeys: body.featureKeys,
+    };
+
+    if (body.q?.trim()) {
+      const nlMapped = parseNaturalLanguageQuery(body.q);
+      mergeNaturalLanguageIntoState(filterState, nlMapped);
+    }
+    if (!filterState.purpose?.trim()) {
+      filterState.purpose = 'for_sale';
     }
 
-    return createPaginatedResponse(items, page, perPage, resp.found);
+    const page = body.page ?? DEFAULT_PAGE;
+    const perPage = body.limit ?? DEFAULT_LIMIT;
+
+    const { items, found } = await runSearch(filterState, page, perPage, request);
+    return createPaginatedResponse(items, page, perPage, found);
   } catch (error) {
     return createErrorResponse(error);
   }
