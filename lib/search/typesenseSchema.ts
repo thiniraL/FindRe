@@ -72,13 +72,16 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     // Must be non-optional because it's the default_sorting_field
     { name: 'updated_at', type: 'int64', sort: true },
 
-    // Searchable text (multi-language)
+    // Searchable text (multi-language) and agent metadata
     { name: 'title_en', type: 'string', optional: true },
     { name: 'title_ar', type: 'string', optional: true },
     { name: 'city_en', type: 'string', optional: true },
     { name: 'area_en', type: 'string', optional: true },
     { name: 'community_en', type: 'string', optional: true },
     { name: 'agent_name', type: 'string', optional: true },
+    { name: 'agent_email', type: 'string', optional: true },
+    { name: 'agent_phone', type: 'string', optional: true },
+    { name: 'agent_whatsapp', type: 'string', optional: true },
 
     // Media
     { name: 'primary_image_url', type: 'string', optional: true },

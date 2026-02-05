@@ -78,7 +78,7 @@ export async function GET(
         primaryImageUrl: row.primary_image_url ?? null,
         galleryUrls: Array.isArray(row.image_urls) ? row.image_urls : [],
       },
-      listedBy:
+      agentBy:
         row.agent_id != null
           ? {
               id: row.agent_id,

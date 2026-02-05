@@ -61,6 +61,9 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'area_en', type: 'string', optional: true },
     { name: 'community_en', type: 'string', optional: true },
     { name: 'agent_name', type: 'string', optional: true },
+    { name: 'agent_email', type: 'string', optional: true },
+    { name: 'agent_phone', type: 'string', optional: true },
+    { name: 'agent_whatsapp', type: 'string', optional: true },
     { name: 'primary_image_url', type: 'string', optional: true },
     { name: 'additional_image_urls', type: 'string[]', optional: true },
     { name: 'geo', type: 'geopoint', optional: true },
@@ -193,6 +196,9 @@ type PropertyDoc = {
   features: string[] | null;
   agent_id: number | null;
   agent_name: string | null;
+  agent_email: string | null;
+  agent_phone: string | null;
+  agent_whatsapp: string | null;
   status: string | null;
   is_off_plan: boolean | null;
   is_featured: boolean;
@@ -294,6 +300,9 @@ serve(async (req) => {
           features: string[] | null;
           agent_id: number | null;
           agent_name: string | null;
+          agent_email: string | null;
+          agent_phone: string | null;
+          agent_whatsapp: string | null;
           status: string | null;
           is_off_plan: boolean | null;
           is_featured: boolean;
@@ -328,6 +337,9 @@ serve(async (req) => {
               pd.features AS features_jsonb,
               a.agent_id,
               a.agent_name,
+              a.email AS agent_email,
+              a.phone AS agent_phone,
+              a.whatsapp AS agent_whatsapp,
               p.status,
               p.is_off_plan,
               COALESCE(p.is_featured, FALSE) AS is_featured,
@@ -417,6 +429,9 @@ serve(async (req) => {
             features: r.features ?? null,
             agent_id: r.agent_id,
             agent_name: r.agent_name,
+            agent_email: r.agent_email,
+            agent_phone: r.agent_phone,
+            agent_whatsapp: r.agent_whatsapp,
             status: r.status,
             is_off_plan: r.is_off_plan,
             is_featured: Boolean(r.is_featured),

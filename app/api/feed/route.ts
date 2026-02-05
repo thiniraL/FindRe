@@ -62,6 +62,9 @@ type TypesensePropertyDoc = {
   features?: string[];
   agent_id?: number;
   agent_name?: string;
+  agent_email?: string;
+  agent_phone?: string;
+  agent_whatsapp?: string;
   status?: string;
   is_off_plan?: boolean;
   is_featured?: boolean;
@@ -141,14 +144,19 @@ export async function GET(request: NextRequest) {
             bathrooms: d.bathrooms ?? null,
             primaryImageUrl: d.primary_image_url ?? null,
             agent: d.agent_id
-              ? { id: d.agent_id, name: d.agent_name ?? null }
+              ? {
+                  id: d.agent_id,
+                  name: d.agent_name ?? null,
+                  email: d.agent_email ?? null,
+                  phone: d.agent_phone ?? null,
+                  whatsapp: d.agent_whatsapp ?? null,
+                }
               : null,
             isFeatured: Boolean(d.is_featured),
             featuredRank: d.featured_rank ?? null,
             additionalImageUrls: d.additional_image_urls ?? [],
             purposeKey: d.purpose_key ?? null,
             isLiked: false,
-            isDisliked: false,
           }
         };
       });
@@ -159,7 +167,6 @@ export async function GET(request: NextRequest) {
         const status = viewStatusMap.get(item.property.id);
         if (status) {
           item.property.isLiked = status.isLiked;
-          item.property.isDisliked = status.isDisliked;
         }
       });
 
@@ -209,12 +216,17 @@ export async function GET(request: NextRequest) {
           bathrooms: d.bathrooms ?? null,
           primaryImageUrl: d.primary_image_url ?? null,
           agent: d.agent_id
-            ? { id: d.agent_id, name: d.agent_name ?? null }
+            ? {
+                id: d.agent_id,
+                name: d.agent_name ?? null,
+                email: d.agent_email ?? null,
+                phone: d.agent_phone ?? null,
+                whatsapp: d.agent_whatsapp ?? null,
+              }
             : null,
           additionalImageUrls: d.additional_image_urls ?? [],
           purposeKey: d.purpose_key ?? null,
           isLiked: false,
-          isDisliked: false,
         },
       };
     });
@@ -225,7 +237,6 @@ export async function GET(request: NextRequest) {
       const status = viewStatusMap.get(item.property.id);
       if (status) {
         item.property.isLiked = status.isLiked;
-        item.property.isDisliked = status.isDisliked;
       }
     });
 
