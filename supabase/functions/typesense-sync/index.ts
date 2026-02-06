@@ -49,6 +49,7 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'features', type: 'string[]', facet: true, optional: true },
     { name: 'agent_id', type: 'int32', facet: true, optional: true },
     { name: 'status', type: 'string', facet: true, optional: true },
+    { name: 'completion_status', type: 'string', facet: true, optional: true },
     { name: 'is_off_plan', type: 'bool', facet: true, optional: true },
     { name: 'is_featured', type: 'bool', facet: true, optional: true },
     { name: 'featured_rank', type: 'int32', optional: true },
@@ -200,6 +201,7 @@ type PropertyDoc = {
   agent_phone: string | null;
   agent_whatsapp: string | null;
   status: string | null;
+  completion_status: string | null;
   is_off_plan: boolean | null;
   is_featured: boolean;
   featured_rank: number;
@@ -304,6 +306,7 @@ serve(async (req) => {
           agent_phone: string | null;
           agent_whatsapp: string | null;
           status: string | null;
+          completion_status: string | null;
           is_off_plan: boolean | null;
           is_featured: boolean;
           featured_rank: number | null;
@@ -341,6 +344,7 @@ serve(async (req) => {
               a.phone AS agent_phone,
               a.whatsapp AS agent_whatsapp,
               p.status,
+              p.completion_status,
               p.is_off_plan,
               COALESCE(p.is_featured, FALSE) AS is_featured,
               p.featured_rank AS featured_rank,
@@ -433,6 +437,7 @@ serve(async (req) => {
             agent_phone: r.agent_phone,
             agent_whatsapp: r.agent_whatsapp,
             status: r.status,
+            completion_status: r.completion_status ?? null,
             is_off_plan: r.is_off_plan,
             is_featured: Boolean(r.is_featured),
             featured_rank: featuredRank,

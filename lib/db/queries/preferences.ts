@@ -26,6 +26,16 @@ export type UserPreferencesRow = {
   preferred_location_ids: number[] | null;
   preferred_purpose_ids: number[] | null;
   preferred_feature_ids: number[] | null;
+  // JSONB tallies from USER_PREFERENCES.preference_counters
+  // Shape (example):
+  // {
+  //   bedrooms: { "1": 2, "2": 5 },
+  //   bathrooms: { "1": 1, "2": 4 },
+  //   price_buckets: { "0-1000000": 3, "1000000-2000000": 2 },
+  //   property_types: { "1": 4, "2": 1 },
+  //   features: { "swimming_pool": 3, "garden": 1 }
+  // }
+  preference_counters: Record<string, any> | null;
   total_properties_viewed: number;
   unique_properties_viewed: number;
   is_ready_for_recommendations: boolean;
@@ -161,6 +171,8 @@ type PreferencesForFeedRow = {
   preferred_location_ids: number[] | null;
   preferred_purpose_ids: number[] | null;
   preferred_feature_ids: number[] | null;
+   // Same JSONB tallies as in UserPreferencesRow
+  preference_counters: Record<string, any> | null;
   is_ready_for_recommendations: boolean;
 };
 
@@ -182,6 +194,7 @@ export async function getPreferencesForFeed(
       preferred_location_ids,
       preferred_purpose_ids,
       preferred_feature_ids,
+      preference_counters,
       is_ready_for_recommendations
     FROM user_activity.USER_PREFERENCES
     WHERE session_id = $1

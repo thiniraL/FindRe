@@ -10,10 +10,8 @@ export type NaturalLanguageMapped = {
   location?: string;
   /** Residual or explicit keyword terms for full-text */
   keyword?: string;
-  bedroomsMin?: number;
-  bedroomsMax?: number;
-  bathroomsMin?: number;
-  bathroomsMax?: number;
+  bedrooms?: number[];
+  bathrooms?: number[];
   priceMin?: number;
   priceMax?: number;
   featureKeys?: string[];
@@ -147,13 +145,11 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   if (bedMatch) {
     const n = parseInt(bedMatch[1], 10);
     if (Number.isFinite(n)) {
-      result.bedroomsMin = n;
-      result.bedroomsMax = n;
+      result.bedrooms = [n];
     }
   }
   if (STUDIO_REGEX.test(text)) {
-    result.bedroomsMin = 0;
-    result.bedroomsMax = 0;
+    result.bedrooms = [0];
   }
 
   // --- Baths ---
@@ -161,9 +157,8 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   const bathMatch = BATHS_REGEX.exec(text);
   if (bathMatch) {
     const n = parseInt(bathMatch[1], 10);
-    if (Number.isFinite(n)) {
-      result.bathroomsMin = n;
-      result.bathroomsMax = n;
+    if (Number.isFinite(n) && n >= 1) {
+      result.bathrooms = [n];
     }
   }
 
@@ -278,10 +273,8 @@ export function mergeNaturalLanguageIntoState(
   if (nl.keyword != null) {
     state.keyword = state.keyword ? `${state.keyword} ${nl.keyword}` : nl.keyword;
   }
-  if (nl.bedroomsMin != null && state.bedroomsMin == null) state.bedroomsMin = nl.bedroomsMin;
-  if (nl.bedroomsMax != null && state.bedroomsMax == null) state.bedroomsMax = nl.bedroomsMax;
-  if (nl.bathroomsMin != null && state.bathroomsMin == null) state.bathroomsMin = nl.bathroomsMin;
-  if (nl.bathroomsMax != null && state.bathroomsMax == null) state.bathroomsMax = nl.bathroomsMax;
+  if (nl.bedrooms?.length && state.bedrooms == null) state.bedrooms = nl.bedrooms;
+  if (nl.bathrooms?.length && state.bathrooms == null) state.bathrooms = nl.bathrooms;
   if (nl.priceMin != null && state.priceMin == null) state.priceMin = nl.priceMin;
   if (nl.priceMax != null && state.priceMax == null) state.priceMax = nl.priceMax;
   if (nl.featureKeys?.length) {

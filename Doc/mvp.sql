@@ -662,6 +662,16 @@ CREATE TABLE user_activity.USER_PREFERENCES (
     preferred_location_ids INT[], -- Array of preferred location IDs
     preferred_purpose_ids INT[], -- Sale vs Rent preference
     preferred_feature_ids INT[], -- Features they like (pool, garden, etc.)
+    -- JSONB tallies for fine-grained preference scoring (per-session)
+    -- Example structure:
+    -- {
+    --   "bedrooms": { "1": 2, "2": 5 },
+    --   "bathrooms": { "1": 1, "2": 4 },
+    --   "price_buckets": { "0-1000000": 3, "1000000-2000000": 2 },
+    --   "property_types": { "1": 4, "2": 1 },
+    --   "features": { "swimming_pool": 3, "garden": 1 }
+    -- }
+    preference_counters JSONB,
     
     -- Preference scores (0-100, higher = stronger preference)
     sale_preference_score INT DEFAULT 50, -- 0-100, 50 = neutral

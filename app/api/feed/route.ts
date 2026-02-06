@@ -80,6 +80,14 @@ type TypesensePropertyDoc = {
   additional_image_urls?: string[];
 };
 
+type PreferenceCounters = {
+  bedrooms?: Record<string, number>;
+  bathrooms?: Record<string, number>;
+  price_buckets?: Record<string, number>;
+  property_types?: Record<string, number>;
+  features?: Record<string, number>;
+};
+
 function toNumber(v: unknown): number | null {
   if (v === null || v === undefined) return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
@@ -88,6 +96,52 @@ function toNumber(v: unknown): number | null {
     return Number.isFinite(n) ? n : null;
   }
   return null;
+}
+
+function bucketPrice(price: number | null | undefined): string | null {
+  if (price == null) return null;
+  if (price < 1_000_000) return '0-1000000';
+  if (price < 2_000_000) return '1000000-2000000';
+  if (price < 5_000_000) return '2000000-5000000';
+  return '5000000+';
+}
+
+function scorePropertyByPreferences(
+  doc: TypesensePropertyDoc,
+  counters: PreferenceCounters | null
+): number {
+  if (!counters) return 0;
+  let score = 0;
+
+  // Bedrooms
+  if (doc.bedrooms != null && counters.bedrooms) {
+    score += counters.bedrooms[String(doc.bedrooms)] ?? 0;
+  }
+
+  // Bathrooms
+  if (doc.bathrooms != null && counters.bathrooms) {
+    score += counters.bathrooms[String(doc.bathrooms)] ?? 0;
+  }
+
+  // Price bucket
+  const bucket = bucketPrice(doc.price ?? null);
+  if (bucket && counters.price_buckets) {
+    score += counters.price_buckets[bucket] ?? 0;
+  }
+
+  // Property type
+  if (doc.property_type_id != null && counters.property_types) {
+    score += counters.property_types[String(doc.property_type_id)] ?? 0;
+  }
+
+  // Features
+  if (doc.features && counters.features) {
+    for (const f of doc.features) {
+      score += counters.features[f] ?? 0;
+    }
+  }
+
+  return score;
 }
 
 export async function GET(request: NextRequest) {
@@ -197,19 +251,32 @@ export async function GET(request: NextRequest) {
       q: q && q.trim() ? q.trim() : '*',
       queryBy: PROPERTIES_QUERY_BY,
       filterBy: filters.length ? filters.join(' && ') : undefined,
+      // updated_at is a secondary sort; primary sort happens in-memory using preference_counters.
       sortBy: 'updated_at:desc',
       page,
       perPage,
     });
 
-    const items = resp.hits.map((h) => {
+    const counters = (prefs.preference_counters ?? null) as PreferenceCounters | null;
+
+    const rankedHits = resp.hits
+      .map((h) => {
+        const d = h.document;
+        const personalScore = scorePropertyByPreferences(d, counters);
+        return { hit: h, personalScore };
+      })
+      .sort((a, b) => b.personalScore - a.personalScore)
+      .map((x) => x.hit);
+
+    const items = rankedHits.map((h) => {
       const d = h.document;
       const locationParts = [d.address, d.community_en, d.area_en, d.city_en].filter(Boolean);
       const location = locationParts.length ? locationParts.join(', ') : null;
       return {
         property: {
           id: Number(d.property_id),
-          title: lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
+          title:
+            lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
           location,
           price: d.price ?? null,
           bedrooms: d.bedrooms ?? null,

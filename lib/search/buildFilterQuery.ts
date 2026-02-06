@@ -10,22 +10,16 @@ export type SearchFilterState = {
   countryId?: number;
   /** Location text → full-text query on property.address (and city/area/community when present) */
   location?: string;
-  /** Completion: all | ready | off_plan → is_off_plan filter (single, GET) */
-  completionStatus?: 'all' | 'ready' | 'off_plan';
-  /** Completion: multiple values for POST body (e.g. ["ready", "off_plan"]) */
-  completionStatuses?: ('ready' | 'off_plan')[];
+  /** Completion: 'all' = no filter; any other value filters by completion_status (from PROPERTIES.completion_status) */
+  completionStatus?: string;
+  /** Completion: multiple values for POST body, filter by completion_status */
+  completionStatuses?: string[];
   /** Property type IDs (Typesense property_type_id) */
   propertyTypeIds?: number[];
-  /** Beds: discrete values (0=Studio, 1,2,3...); when set, overrides min/max */
+  /** Beds: discrete values (0=Studio, 1,2,3...) */
   bedrooms?: number[];
-  /** Beds: min (0 = Studio), max (range, GET) */
-  bedroomsMin?: number;
-  bedroomsMax?: number;
-  /** Baths: discrete values; when set, overrides min/max */
+  /** Baths: discrete values */
   bathrooms?: number[];
-  /** Baths: min, max (range, GET) */
-  bathroomsMin?: number;
-  bathroomsMax?: number;
   /** Price range */
   priceMin?: number;
   priceMax?: number;
@@ -35,9 +29,7 @@ export type SearchFilterState = {
   areaUnit?: 'sqm' | 'sqft';
   /** Keyword → appended to full-text q */
   keyword?: string;
-  /** Agent ID (single, GET) */
-  agentId?: number;
-  /** Agent IDs (multiple, POST) */
+  /** Agent IDs (one or more) */
   agentIds?: number[];
   /** Feature keys from PROPERTY_DETAILS.features, e.g. ["pool", "garden"] */
   featureKeys?: string[];
@@ -61,39 +53,21 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
     parts.push(`country_id:=${state.countryId}`);
   }
   if (state.completionStatuses?.length) {
-    const statusParts = state.completionStatuses.map((s) =>
-      s === 'ready' ? 'is_off_plan:=false' : 'is_off_plan:=true'
+    const statusParts = state.completionStatuses.map(
+      (s) => `completion_status:=${escapeFilterValue(s)}`
     );
     parts.push(`(${statusParts.join(' || ')})`);
   } else if (state.completionStatus && state.completionStatus !== 'all') {
-    if (state.completionStatus === 'ready') {
-      parts.push('is_off_plan:=false');
-    } else if (state.completionStatus === 'off_plan') {
-      parts.push('is_off_plan:=true');
-    }
+    parts.push(`completion_status:=${escapeFilterValue(state.completionStatus)}`);
   }
   if (state.propertyTypeIds?.length) {
     parts.push(`property_type_id:=[${state.propertyTypeIds.join(',')}]`);
   }
   if (state.bedrooms?.length) {
     parts.push(`bedrooms:=[${state.bedrooms.join(',')}]`);
-  } else {
-    if (state.bedroomsMin != null && state.bedroomsMin > 0) {
-      parts.push(`bedrooms:>=${state.bedroomsMin}`);
-    }
-    if (state.bedroomsMax != null) {
-      parts.push(`bedrooms:<=${state.bedroomsMax}`);
-    }
   }
   if (state.bathrooms?.length) {
     parts.push(`bathrooms:=[${state.bathrooms.join(',')}]`);
-  } else {
-    if (state.bathroomsMin != null && state.bathroomsMin > 0) {
-      parts.push(`bathrooms:>=${state.bathroomsMin}`);
-    }
-    if (state.bathroomsMax != null) {
-      parts.push(`bathrooms:<=${state.bathroomsMax}`);
-    }
   }
   if (state.priceMin != null && state.priceMin > 0) {
     parts.push(`price:>=${state.priceMin}`);
@@ -110,8 +84,6 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
   }
   if (state.agentIds?.length) {
     parts.push(`agent_id:=[${state.agentIds.join(',')}]`);
-  } else if (state.agentId != null) {
-    parts.push(`agent_id:=${state.agentId}`);
   }
   if (state.featureKeys?.length) {
     const safe = state.featureKeys.map((k) => /^[a-z0-9_]+$/i.test(k) ? k : `"${escapeFilterValue(k)}"`).join(',');

@@ -1,13 +1,3 @@
--- Migration: Update Preference Analysis Logic
--- Date: 2026-01-29
---
--- Logic Changes:
--- 1. Exclude disliked properties (is_disliked = TRUE) from all preference calculations.
--- 2. Weight liked properties (is_liked = TRUE) 3x when calculating Sale vs Rent scores.
--- 3. Use standard COUNT(*) for neutral views.
-
-BEGIN;
-
 CREATE OR REPLACE FUNCTION analyze_user_preferences(p_session_id VARCHAR(100))
 RETURNS VOID AS $$
 DECLARE
@@ -26,14 +16,22 @@ DECLARE
     v_rent_score INT := 50;
     v_total_score INT;
     v_user_id UUID;
+
+    -- JSONB tallies (weighted counts) for preference-based scoring
+    v_bedrooms_counts JSONB;
+    v_bathrooms_counts JSONB;
+    v_price_bucket_counts JSONB;
+    v_property_type_counts JSONB;
+    v_feature_counts JSONB;
+    v_preference_counters JSONB;
 BEGIN
-    -- Count total VALID views (excluding disliked)
+    -- Count total VALID feedback events (exclude disliked)
     SELECT COUNT(*) INTO v_view_count
     FROM property.PROPERTY_VIEWS
     WHERE session_id = p_session_id
       AND COALESCE(is_disliked, FALSE) = FALSE;
     
-    -- Only analyze if >= 5 valid views
+    -- Only analyze if >= 5 valid feedback entries
     IF v_view_count < 5 THEN
         UPDATE user_activity.USER_PREFERENCES
         SET is_ready_for_recommendations = FALSE,
@@ -43,7 +41,10 @@ BEGIN
     END IF;
     
     -- Get user_id from session
-    SELECT user_id INTO v_user_id FROM user_activity.USER_SESSIONS WHERE session_id = p_session_id;
+    SELECT user_id
+    INTO v_user_id
+    FROM user_activity.USER_SESSIONS
+    WHERE session_id = p_session_id;
     
     -- Analyze bedroom preferences (Exclude disliked)
     SELECT 
@@ -80,10 +81,10 @@ BEGIN
         AND COALESCE(pv.is_disliked, FALSE) = FALSE
         AND p.price IS NOT NULL;
     
-    -- Analyze Sale vs Rent preference (Weighted: Like=3, Normal=1, Dislike=0)
+    -- Analyze Sale vs Rent preference (Weighted: Like=3, Neutral=1, Dislike=0)
     SELECT 
-        COALESCE(SUM(CASE WHEN is_liked THEN 3 ELSE 1 END) FILTER (WHERE pur.purpose_key = 'for_sale'), 0),
-        COALESCE(SUM(CASE WHEN is_liked THEN 3 ELSE 1 END) FILTER (WHERE pur.purpose_key = 'for_rent'), 0)
+        COALESCE(SUM(CASE WHEN pv.is_liked THEN 3 ELSE 1 END) FILTER (WHERE pur.purpose_key = 'for_sale'), 0),
+        COALESCE(SUM(CASE WHEN pv.is_liked THEN 3 ELSE 1 END) FILTER (WHERE pur.purpose_key = 'for_rent'), 0)
     INTO v_sale_score_raw, v_rent_score_raw
     FROM property.PROPERTY_VIEWS pv
     JOIN property.PROPERTIES p ON pv.property_id = p.property_id
@@ -97,8 +98,142 @@ BEGIN
         v_sale_score := (v_sale_score_raw * 100 / v_total_score);
         v_rent_score := (v_rent_score_raw * 100 / v_total_score);
     END IF;
+
+    -----------------------------------------------------------------------
+    -- JSONB tallies ("tally marks") for fine-grained preference scoring
+    -----------------------------------------------------------------------
+
+    -- Bedrooms tally: { "1": weight, "2": weight, ... } (exclude disliked; likes = +3, neutral = +1)
+    SELECT COALESCE(
+        jsonb_object_agg((t.bedrooms)::text, t.weight),
+        '{}'::jsonb
+    )
+    INTO v_bedrooms_counts
+    FROM (
+        SELECT
+            pd.bedrooms,
+            SUM(
+                CASE
+                    WHEN pv.is_liked THEN 3
+                    ELSE 1
+                END
+            ) AS weight
+        FROM property.PROPERTY_VIEWS pv
+        JOIN property.PROPERTY_DETAILS pd ON pd.property_id = pv.property_id
+        WHERE pv.session_id = p_session_id
+          AND COALESCE(pv.is_disliked, FALSE) = FALSE
+          AND pd.bedrooms IS NOT NULL
+        GROUP BY pd.bedrooms
+    ) AS t;
+
+    -- Bathrooms tally: { "1": weight, "2": weight, ... } (exclude disliked; likes = +3, neutral = +1)
+    SELECT COALESCE(
+        jsonb_object_agg((t.bathrooms)::text, t.weight),
+        '{}'::jsonb
+    )
+    INTO v_bathrooms_counts
+    FROM (
+        SELECT
+            pd.bathrooms,
+            SUM(
+                CASE
+                    WHEN pv.is_liked THEN 3
+                    ELSE 1
+                END
+            ) AS weight
+        FROM property.PROPERTY_VIEWS pv
+        JOIN property.PROPERTY_DETAILS pd ON pd.property_id = pv.property_id
+        WHERE pv.session_id = p_session_id
+          AND COALESCE(pv.is_disliked, FALSE) = FALSE
+          AND pd.bathrooms IS NOT NULL
+        GROUP BY pd.bathrooms
+    ) AS t;
+
+    -- Price bucket tally (exclude disliked; likes = +3, neutral = +1)
+    SELECT COALESCE(
+        jsonb_object_agg(t.bucket, t.weight),
+        '{}'::jsonb
+    )
+    INTO v_price_bucket_counts
+    FROM (
+        SELECT
+            CASE
+                WHEN p.price < 1000000 THEN '0-1000000'
+                WHEN p.price < 2000000 THEN '1000000-2000000'
+                WHEN p.price < 5000000 THEN '2000000-5000000'
+                ELSE '5000000+'
+            END AS bucket,
+            SUM(
+                CASE
+                    WHEN pv.is_liked THEN 3
+                    ELSE 1
+                END
+            ) AS weight
+        FROM property.PROPERTY_VIEWS pv
+        JOIN property.PROPERTIES p ON p.property_id = pv.property_id
+        WHERE pv.session_id = p_session_id
+          AND COALESCE(pv.is_disliked, FALSE) = FALSE
+          AND p.price IS NOT NULL
+        GROUP BY bucket
+    ) AS t;
+
+    -- Property type tally: { "<type_id>": weight, ... } (exclude disliked; likes = +3, neutral = +1)
+    SELECT COALESCE(
+        jsonb_object_agg((t.property_type_id)::text, t.weight),
+        '{}'::jsonb
+    )
+    INTO v_property_type_counts
+    FROM (
+        SELECT
+            p.property_type_id,
+            SUM(
+                CASE
+                    WHEN pv.is_liked THEN 3
+                    ELSE 1
+                END
+            ) AS weight
+        FROM property.PROPERTY_VIEWS pv
+        JOIN property.PROPERTIES p ON p.property_id = pv.property_id
+        WHERE pv.session_id = p_session_id
+          AND COALESCE(pv.is_disliked, FALSE) = FALSE
+          AND p.property_type_id IS NOT NULL
+        GROUP BY p.property_type_id
+    ) AS t;
+
+    -- Feature tallies from PROPERTY_DETAILS.features JSONB keys (exclude disliked; likes = +3, neutral = +1)
+    SELECT COALESCE(
+        jsonb_object_agg(t.feature_key, t.weight),
+        '{}'::jsonb
+    )
+    INTO v_feature_counts
+    FROM (
+        SELECT
+            jsonb_array_elements_text(
+                COALESCE(pd.features, '[]'::jsonb)
+            ) AS feature_key,
+            SUM(
+                CASE
+                    WHEN pv.is_liked THEN 3
+                    ELSE 1
+                END
+            ) AS weight
+        FROM property.PROPERTY_VIEWS pv
+        JOIN property.PROPERTY_DETAILS pd ON pd.property_id = pv.property_id
+        WHERE pv.session_id = p_session_id
+          AND COALESCE(pv.is_disliked, FALSE) = FALSE
+        GROUP BY feature_key
+    ) AS t;
+
+    -- Final JSONB preference_counters payload
+    v_preference_counters := jsonb_build_object(
+        'bedrooms', COALESCE(v_bedrooms_counts, '{}'::jsonb),
+        'bathrooms', COALESCE(v_bathrooms_counts, '{}'::jsonb),
+        'price_buckets', COALESCE(v_price_bucket_counts, '{}'::jsonb),
+        'property_types', COALESCE(v_property_type_counts, '{}'::jsonb),
+        'features', COALESCE(v_feature_counts, '{}'::jsonb)
+    );
     
-    -- Update or insert preferences
+    -- Upsert USER_PREFERENCES
     INSERT INTO user_activity.USER_PREFERENCES (
         session_id,
         user_id,
@@ -114,6 +249,7 @@ BEGIN
         preferred_location_ids,
         preferred_purpose_ids,
         preferred_feature_ids,
+        preference_counters,
         sale_preference_score,
         rent_preference_score,
         total_properties_viewed,
@@ -133,14 +269,11 @@ BEGIN
         v_price_min,
         v_price_max,
         v_price_avg,
-        -- Array of property types viewed (Exclude disliked)
         ARRAY_AGG(DISTINCT p.property_type_id) FILTER (WHERE p.property_type_id IS NOT NULL),
-        -- Array of locations viewed (Exclude disliked)
         ARRAY_AGG(DISTINCT p.location_id) FILTER (WHERE p.location_id IS NOT NULL),
-        -- Array of purposes viewed (Exclude disliked)
         ARRAY_AGG(DISTINCT p.purpose_id) FILTER (WHERE p.purpose_id IS NOT NULL),
-        -- Array of features viewed (Exclude disliked)
         ARRAY_AGG(DISTINCT pf.feature_id) FILTER (WHERE pf.feature_id IS NOT NULL),
+        v_preference_counters,
         v_sale_score,
         v_rent_score,
         v_view_count,
@@ -168,6 +301,7 @@ BEGIN
         preferred_location_ids = EXCLUDED.preferred_location_ids,
         preferred_purpose_ids = EXCLUDED.preferred_purpose_ids,
         preferred_feature_ids = EXCLUDED.preferred_feature_ids,
+        preference_counters = EXCLUDED.preference_counters,
         sale_preference_score = EXCLUDED.sale_preference_score,
         rent_preference_score = EXCLUDED.rent_preference_score,
         total_properties_viewed = EXCLUDED.total_properties_viewed,
@@ -177,5 +311,3 @@ BEGIN
         updated_at = NOW() AT TIME ZONE 'UTC';
 END;
 $$ LANGUAGE plpgsql;
-
-COMMIT;

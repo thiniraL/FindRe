@@ -60,6 +60,7 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'features', type: 'string[]', facet: true, optional: true },
     { name: 'agent_id', type: 'int32', facet: true, optional: true },
     { name: 'status', type: 'string', facet: true, optional: true },
+    { name: 'completion_status', type: 'string', facet: true, optional: true },
     { name: 'is_off_plan', type: 'bool', facet: true, optional: true },
 
     // Featured
