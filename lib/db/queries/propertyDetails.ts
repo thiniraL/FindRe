@@ -88,7 +88,10 @@ export async function getPropertyById(
       a.whatsapp AS agent_whatsapp,
       primary_img.image_url AS primary_image_url,
       (
-        SELECT array_agg(pi.image_url ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC)
+        SELECT array_agg(
+          COALESCE(pi.compressed_image_url, pi.image_url)
+          ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC
+        )
         FROM property.PROPERTY_IMAGES pi
         WHERE pi.property_id = p.property_id
       ) AS image_urls
@@ -101,7 +104,7 @@ export async function getPropertyById(
     JOIN property.PROPERTY_TYPES pt ON pt.type_id = p.property_type_id
     LEFT JOIN business.AGENTS a ON a.agent_id = p.agent_id
     LEFT JOIN LATERAL (
-      SELECT pi.image_url
+      SELECT COALESCE(pi.compressed_image_url, pi.image_url) AS image_url
       FROM property.PROPERTY_IMAGES pi
       WHERE pi.property_id = p.property_id
       ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC

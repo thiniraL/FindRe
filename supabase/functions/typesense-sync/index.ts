@@ -371,10 +371,15 @@ serve(async (req) => {
             img.image_url AS primary_image_url,
             feats.features,
             add_imgs.additional_image_urls,
-            EXTRACT(EPOCH FROM b.updated_at)::bigint AS updated_epoch
+            EXTRACT(
+              EPOCH FROM GREATEST(
+                b.updated_at,
+                COALESCE(img_times.last_compressed_at, b.updated_at)
+              )
+            )::bigint AS updated_epoch
           FROM base b
           LEFT JOIN LATERAL (
-            SELECT pi.image_url
+            SELECT COALESCE(pi.compressed_image_url, pi.image_url) AS image_url
             FROM property.PROPERTY_IMAGES pi
             WHERE pi.property_id = b.property_id
             ORDER BY pi.is_primary DESC, pi.display_order ASC, pi.image_id ASC
@@ -389,17 +394,38 @@ serve(async (req) => {
           LEFT JOIN LATERAL (
             -- Fetch up to 5 additional image URLs
             SELECT ARRAY(
-              SELECT pi.image_url
+              SELECT COALESCE(pi.compressed_image_url, pi.image_url)
               FROM property.PROPERTY_IMAGES pi
               WHERE pi.property_id = b.property_id
                 -- Exclude primary image if already picked (handle NULL primary)
-                AND pi.image_url IS DISTINCT FROM img.image_url
+                AND COALESCE(pi.compressed_image_url, pi.image_url) IS DISTINCT FROM img.image_url
               ORDER BY pi.display_order ASC, pi.image_id ASC
               LIMIT 5
             ) AS additional_image_urls
           ) add_imgs ON TRUE
-          WHERE (EXTRACT(EPOCH FROM b.updated_at)::bigint > $1)
-             OR (EXTRACT(EPOCH FROM b.updated_at)::bigint = $1 AND b.property_id > $3)
+          LEFT JOIN LATERAL (
+            -- Track the latest compression time across all images
+            SELECT MAX(pi.last_compressed_at) AS last_compressed_at
+            FROM property.PROPERTY_IMAGES pi
+            WHERE pi.property_id = b.property_id
+          ) img_times ON TRUE
+          WHERE (
+            EXTRACT(
+              EPOCH FROM GREATEST(
+                b.updated_at,
+                COALESCE(img_times.last_compressed_at, b.updated_at)
+              )
+            )::bigint > $1
+          )
+             OR (
+               EXTRACT(
+                 EPOCH FROM GREATEST(
+                   b.updated_at,
+                   COALESCE(img_times.last_compressed_at, b.updated_at)
+                 )
+               )::bigint = $1
+               AND b.property_id > $3
+             )
           ORDER BY updated_epoch ASC, b.property_id ASC
           LIMIT $2
           `,

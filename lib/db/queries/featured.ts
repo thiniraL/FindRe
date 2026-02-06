@@ -65,7 +65,7 @@ export async function getFeaturedProperties(options: {
     LEFT JOIN property.PROPERTY_DETAILS pd ON pd.property_id = p.property_id
     JOIN master.CURRENCIES c ON c.currency_id = p.currency_id
     LEFT JOIN LATERAL (
-      SELECT pi.image_url
+      SELECT COALESCE(pi.compressed_image_url, pi.image_url) AS image_url
       FROM property.PROPERTY_IMAGES pi
       WHERE pi.property_id = p.property_id
       ORDER BY pi.is_primary DESC, pi.display_order ASC, pi.image_id ASC
