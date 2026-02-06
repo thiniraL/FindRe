@@ -13,6 +13,9 @@ export type OnboardingPreferencesUpsertInput = {
   preferredFeatureIds?: number[];
 };
 
+// Top-level keys (e.g. "bedrooms", "bathrooms") each contain a map of bucket/value -> count.
+export type PreferenceCounters = Record<string, Record<string, number>>;
+
 export type UserPreferencesRow = {
   session_id: string;
   user_id: string | null;
@@ -35,7 +38,7 @@ export type UserPreferencesRow = {
   //   property_types: { "1": 4, "2": 1 },
   //   features: { "swimming_pool": 3, "garden": 1 }
   // }
-  preference_counters: Record<string, any> | null;
+  preference_counters: PreferenceCounters | null;
   total_properties_viewed: number;
   unique_properties_viewed: number;
   is_ready_for_recommendations: boolean;
@@ -172,7 +175,7 @@ type PreferencesForFeedRow = {
   preferred_purpose_ids: number[] | null;
   preferred_feature_ids: number[] | null;
    // Same JSONB tallies as in UserPreferencesRow
-  preference_counters: Record<string, any> | null;
+  preference_counters: PreferenceCounters | null;
   is_ready_for_recommendations: boolean;
 };
 
