@@ -9,6 +9,7 @@ import {
   buildSearchQuery,
   type SearchFilterState,
 } from '@/lib/search/buildFilterQuery';
+// GET/POST keys match SEARCH_FILTER_CONFIGS filter id (see lib/search/filterConfigToSearchKeys.ts; price→priceMin/priceMax, area→areaMin/areaMax; area always sqm)
 import {
   parseNaturalLanguageQuery,
   mergeNaturalLanguageIntoState,
@@ -76,13 +77,16 @@ function parseOptionalIntList(value: string | undefined): number[] | undefined {
   return parsed.length ? parsed : undefined;
 }
 
-function parseOptionalStringList(value: string | undefined): string[] | undefined {
-  if (!value?.trim()) return undefined;
-  const list = value
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return list.length ? list : undefined;
+/** Normalize keyword to a single search string: array -> join with space; string (comma-separated ok) -> trimmed. */
+function normalizeKeyword(value: string | string[] | undefined): string | undefined {
+  if (value == null) return undefined;
+  if (Array.isArray(value)) {
+    const joined = value.map((s) => String(s).trim()).filter(Boolean).join(' ');
+    return joined.length ? joined : undefined;
+  }
+  const s = String(value).trim();
+  if (!s) return undefined;
+  return s.includes(',') ? s.split(',').map((x) => x.trim()).filter(Boolean).join(' ') : s;
 }
 
 function getLanguageCode(request: NextRequest): 'en' | 'ar' {
@@ -123,6 +127,7 @@ export async function GET(request: NextRequest) {
       countryId: parsed.countryId ?? DEFAULT_COUNTRY_ID,
       location: parsed.location,
       completionStatus: parsed.completionStatus,
+      mainPropertyTypeIds: parseOptionalIntList(parsed.mainPropertyTypeIds)?.filter((n) => n >= 1),
       propertyTypeIds: parseOptionalIntList(parsed.propertyTypeIds),
       bedrooms: parseOptionalIntList(parsed.bedrooms),
       bathrooms: parseOptionalIntList(parsed.bathrooms)?.filter((n) => n >= 1),
@@ -130,10 +135,9 @@ export async function GET(request: NextRequest) {
       priceMax: parsed.priceMax,
       areaMin: parsed.areaMin,
       areaMax: parsed.areaMax,
-      areaUnit: parsed.areaUnit ?? 'sqm',
-      keyword: parsed.keyword,
+      keyword: normalizeKeyword(parsed.keyword),
       agentIds: parseOptionalIntList(parsed.agentIds)?.filter((n) => n >= 1),
-      featureKeys: parseOptionalStringList(parsed.featureKeys),
+      featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
 
     // Natural language query mapping: parse "q" and merge into filter state (explicit params override)
@@ -250,6 +254,7 @@ export async function POST(request: NextRequest) {
       countryId: body.countryId ?? DEFAULT_COUNTRY_ID,
       location: body.location,
       completionStatuses: body.completionStatus?.length ? body.completionStatus : undefined,
+      mainPropertyTypeIds: body.mainPropertyTypeIds?.length ? body.mainPropertyTypeIds : undefined,
       propertyTypeIds: body.propertyTypeIds,
       bedrooms: body.bedrooms?.length ? body.bedrooms : undefined,
       bathrooms: body.bathrooms?.length ? body.bathrooms : undefined,
@@ -257,10 +262,9 @@ export async function POST(request: NextRequest) {
       priceMax: body.priceMax,
       areaMin: body.areaMin,
       areaMax: body.areaMax,
-      areaUnit: body.areaUnit ?? 'sqm',
-      keyword: body.keyword,
+      keyword: normalizeKeyword(body.keyword),
       agentIds: body.agentIds?.length ? body.agentIds : undefined,
-      featureKeys: body.featureKeys,
+      featureIds: body.featureIds?.length ? body.featureIds : undefined,
     };
 
     if (body.q?.trim()) {

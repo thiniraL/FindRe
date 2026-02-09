@@ -37,6 +37,8 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'purpose_id', type: 'int32', facet: true, optional: true },
     { name: 'purpose_key', type: 'string', facet: true, optional: true },
     { name: 'property_type_id', type: 'int32', facet: true, optional: true },
+    { name: 'property_type_ids', type: 'int32[]', facet: true, optional: true },
+    { name: 'main_property_type_ids', type: 'int32[]', facet: true, optional: true },
     { name: 'price', type: 'float', facet: true, optional: true },
     { name: 'currency_id', type: 'int32', facet: true, optional: true },
     { name: 'bedrooms', type: 'int32', facet: true, optional: true },
@@ -45,7 +47,8 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'area_sqm', type: 'float', facet: true, optional: true },
     // Location search uses address text
     { name: 'address', type: 'string', optional: true },
-    // Feature keys, e.g. ["pool","air_conditioning"]
+    // Feature IDs (filter by feature_ids); display keys in features
+    { name: 'feature_ids', type: 'int32[]', facet: true, optional: true },
     { name: 'features', type: 'string[]', facet: true, optional: true },
     { name: 'agent_id', type: 'int32', facet: true, optional: true },
     { name: 'status', type: 'string', facet: true, optional: true },
@@ -187,6 +190,8 @@ type PropertyDoc = {
   purpose_id: number | null;
   purpose_key: string | null;
   property_type_id: number | null;
+  property_type_ids: number[] | null;
+  main_property_type_ids: number[] | null;
   price: number | null;
   currency_id: number | null;
   bedrooms: number | null;
@@ -194,6 +199,7 @@ type PropertyDoc = {
   area_sqft: number | null;
   area_sqm: number | null;
   address: string | null;
+  feature_ids: number[] | null;
   features: string[] | null;
   agent_id: number | null;
   agent_name: string | null;
@@ -285,13 +291,15 @@ serve(async (req) => {
       const client = await pool.connect();
       try {
         // Location: property.address only; LOCATIONS optional (country_id default 1 when null).
-        // Features: PROPERTY_DETAILS.features only; FEATURES/PROPERTY_FEATURES not used.
+        // Features: PROPERTY_DETAILS.feature_ids; features (keys) derived for display.
         const result = await client.queryObject<{
           property_id: number;
           country_id: number;
           purpose_id: number | null;
           purpose_key: string | null;
           property_type_id: number | null;
+          property_type_ids: number[] | null;
+          main_property_type_ids: number[] | null;
           price: number | null;
           currency_id: number | null;
           bedrooms: number | null;
@@ -299,6 +307,7 @@ serve(async (req) => {
           area_sqft: number | null;
           area_sqm: number | null;
           address: string | null;
+          feature_ids: number[] | null;
           features: string[] | null;
           agent_id: number | null;
           agent_name: string | null;
@@ -329,7 +338,9 @@ serve(async (req) => {
               COALESCE(l.country_id, 1) AS country_id,
               p.purpose_id,
               pur.purpose_key,
-              p.property_type_id,
+              (p.property_type_ids)[1] AS property_type_id,
+              p.property_type_ids,
+              p.main_property_type_ids,
               p.price,
               p.currency_id,
               pd.bedrooms,
@@ -337,7 +348,7 @@ serve(async (req) => {
               pd.area_sqft,
               pd.area_sqm,
               p.address,
-              pd.features AS features_jsonb,
+              pd.feature_ids AS feature_ids,
               a.agent_id,
               a.agent_name,
               a.email AS agent_email,
@@ -386,9 +397,10 @@ serve(async (req) => {
             LIMIT 1
           ) img ON TRUE
           LEFT JOIN LATERAL (
-            -- Convert JSONB array of strings into text[] for Typesense string[]
+            -- Derive feature keys from feature_ids for display/facet
             SELECT ARRAY(
-              SELECT jsonb_array_elements_text(COALESCE(b.features_jsonb, '[]'::jsonb))
+              SELECT f.feature_key FROM unnest(COALESCE(b.feature_ids, '{}')) AS fid
+              JOIN property.FEATURES f ON f.feature_id = fid
             ) AS features
           ) feats ON TRUE
           LEFT JOIN LATERAL (
@@ -449,6 +461,8 @@ serve(async (req) => {
             purpose_id: r.purpose_id,
             purpose_key: r.purpose_key,
             property_type_id: r.property_type_id,
+            property_type_ids: r.property_type_ids ?? null,
+            main_property_type_ids: r.main_property_type_ids ?? null,
             price: r.price !== null ? Number(r.price) : null,
             currency_id: r.currency_id,
             bedrooms: r.bedrooms,
@@ -456,6 +470,7 @@ serve(async (req) => {
             area_sqft: r.area_sqft !== null ? Number(r.area_sqft) : null,
             area_sqm: r.area_sqm !== null ? Number(r.area_sqm) : null,
             address: r.address,
+            feature_ids: r.feature_ids ?? null,
             features: r.features ?? null,
             agent_id: r.agent_id,
             agent_name: r.agent_name,

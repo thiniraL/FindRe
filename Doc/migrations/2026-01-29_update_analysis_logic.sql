@@ -208,9 +208,7 @@ BEGIN
     INTO v_feature_counts
     FROM (
         SELECT
-            jsonb_array_elements_text(
-                COALESCE(pd.features, '[]'::jsonb)
-            ) AS feature_key,
+            f.feature_key,
             SUM(
                 CASE
                     WHEN pv.is_liked THEN 3
@@ -219,9 +217,11 @@ BEGIN
             ) AS weight
         FROM property.PROPERTY_VIEWS pv
         JOIN property.PROPERTY_DETAILS pd ON pd.property_id = pv.property_id
+        CROSS JOIN LATERAL unnest(COALESCE(pd.feature_ids, '{}')) AS fid
+        JOIN property.FEATURES f ON f.feature_id = fid
         WHERE pv.session_id = p_session_id
           AND COALESCE(pv.is_disliked, FALSE) = FALSE
-        GROUP BY feature_key
+        GROUP BY f.feature_key
     ) AS t;
 
     -- Final JSONB preference_counters payload

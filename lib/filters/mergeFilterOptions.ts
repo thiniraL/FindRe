@@ -3,6 +3,7 @@ import type { FilterScope } from '@/lib/db/queries/filterOptions';
 import {
   getPropertyCountByPurpose,
   getCompletionStatusOptions,
+  getMainPropertyTypesForFilter,
   getPropertyTypesForFilter,
   getBedroomsRange,
   getBathroomsRange,
@@ -10,6 +11,7 @@ import {
   getAreaRange,
   getFeaturesForFilter,
   getAgentsForFilter,
+  getKeywordsForFilter,
 } from '@/lib/db/queries/filterOptions';
 
 type ConfigFilter = Record<string, unknown> & { id?: string; options?: unknown[]; min?: number; max?: number; defaultMin?: number; defaultMax?: number };
@@ -20,6 +22,19 @@ type ConfigWithFilters = Record<string, unknown> & {
 
 function deepClone<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
+}
+
+/** Build checkbox-group options from a numeric range; labelFn(n) gives the display label. */
+function buildRangeOptions(
+  min: number,
+  max: number,
+  labelFn: (n: number) => string
+): Array<{ value: number; label: string }> {
+  const options: Array<{ value: number; label: string }> = [];
+  for (let n = min; n <= max; n++) {
+    options.push({ value: n, label: labelFn(n) });
+  }
+  return options;
 }
 
 /**
@@ -37,6 +52,7 @@ export async function mergeFilterOptions(
   const [
     countResult,
     completionOptions,
+    mainPropertyTypeOptions,
     propertyTypeOptions,
     bedroomsRange,
     bathroomsRange,
@@ -44,9 +60,11 @@ export async function mergeFilterOptions(
     areaRange,
     featureOptions,
     agentOptions,
+    keywordOptions,
   ] = await Promise.all([
     getPropertyCountByPurpose(scope),
     getCompletionStatusOptions(scope),
+    getMainPropertyTypesForFilter(lang),
     getPropertyTypesForFilter(lang),
     getBedroomsRange(scope),
     getBathroomsRange(scope),
@@ -54,6 +72,7 @@ export async function mergeFilterOptions(
     getAreaRange(scope),
     getFeaturesForFilter(scope),
     getAgentsForFilter(scope),
+    getKeywordsForFilter(),
   ]);
 
   const totalCount = countResult.count;
@@ -72,27 +91,31 @@ export async function mergeFilterOptions(
     if (!id) continue;
 
     switch (id) {
-      case 'completion_status':
+      case 'completionStatus':
         filter.options = completionOptions;
         break;
-      case 'property_type':
-      case 'property_subtype':
+      case 'mainPropertyTypeIds':
+        filter.options = mainPropertyTypeOptions;
+        break;
+      case 'propertyTypeIds':
         filter.options = propertyTypeOptions;
         break;
       case 'bedrooms':
         if (bedroomsRange) {
-          filter.min = bedroomsRange.min;
-          filter.max = bedroomsRange.max;
-          filter.defaultMin = bedroomsRange.min;
-          filter.defaultMax = bedroomsRange.max;
+          filter.options = buildRangeOptions(
+            bedroomsRange.min,
+            bedroomsRange.max,
+            (n) => (n === 0 ? 'Studio' : n >= 6 ? `${n}+` : String(n))
+          );
         }
         break;
       case 'bathrooms':
         if (bathroomsRange) {
-          filter.min = bathroomsRange.min;
-          filter.max = bathroomsRange.max;
-          filter.defaultMin = bathroomsRange.min;
-          filter.defaultMax = bathroomsRange.max;
+          filter.options = buildRangeOptions(
+            bathroomsRange.min,
+            bathroomsRange.max,
+            (n) => (n >= 6 ? `${n}+` : String(n))
+          );
         }
         break;
       case 'price':
@@ -111,11 +134,14 @@ export async function mergeFilterOptions(
           filter.defaultMax = areaRange.max;
         }
         break;
-      case 'features':
+      case 'featureIds':
         filter.options = featureOptions;
         break;
-      case 'agent_or_agency':
+      case 'agentIds':
         filter.options = agentOptions;
+        break;
+      case 'keyword':
+        filter.options = keywordOptions;
         break;
       default:
         break;

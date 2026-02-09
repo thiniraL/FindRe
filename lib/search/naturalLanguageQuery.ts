@@ -277,11 +277,6 @@ export function mergeNaturalLanguageIntoState(
   if (nl.bathrooms?.length && state.bathrooms == null) state.bathrooms = nl.bathrooms;
   if (nl.priceMin != null && state.priceMin == null) state.priceMin = nl.priceMin;
   if (nl.priceMax != null && state.priceMax == null) state.priceMax = nl.priceMax;
-  if (nl.featureKeys?.length) {
-    const existing = new Set(state.featureKeys ?? []);
-    nl.featureKeys.forEach((k) => existing.add(k));
-    state.featureKeys = Array.from(existing);
-  }
   if (nl.propertyTypeKeywords?.length && state.propertyTypeIds == null) {
     const ids = nl.propertyTypeKeywords
       .map((k) => PROPERTY_TYPE_KEY_TO_ID[k])

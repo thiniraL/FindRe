@@ -207,6 +207,62 @@ export async function getPropertyViewStatus(
   return map;
 }
 
+/**
+ * Get paginated list of property IDs the user/session has liked (favourites),
+ * ordered by most recently liked first (feedback_at DESC).
+ * Uses user_id when provided, otherwise session_id with user_id IS NULL.
+ */
+export async function getLikedPropertyIds(
+  sessionId: string,
+  userId: string | null,
+  limit: number,
+  offset: number
+): Promise<{ propertyIds: number[]; total: number }> {
+  if (userId) {
+    const countRes = await query<{ c: string }>(
+      `
+      SELECT COUNT(*)::text AS c
+      FROM property.PROPERTY_VIEWS
+      WHERE user_id = $1 AND is_liked = TRUE
+      `,
+      [userId]
+    );
+    const total = parseInt(countRes.rows[0]?.c ?? '0', 10);
+    const idRes = await query<{ property_id: number }>(
+      `
+      SELECT property_id
+      FROM property.PROPERTY_VIEWS
+      WHERE user_id = $1 AND is_liked = TRUE
+      ORDER BY feedback_at DESC NULLS LAST, viewed_at DESC
+      LIMIT $2 OFFSET $3
+      `,
+      [userId, limit, offset]
+    );
+    return { propertyIds: idRes.rows.map((r) => r.property_id), total };
+  }
+
+  const countRes = await query<{ c: string }>(
+    `
+    SELECT COUNT(*)::text AS c
+    FROM property.PROPERTY_VIEWS
+    WHERE session_id = $1 AND user_id IS NULL AND is_liked = TRUE
+    `,
+    [sessionId]
+  );
+  const total = parseInt(countRes.rows[0]?.c ?? '0', 10);
+  const idRes = await query<{ property_id: number }>(
+    `
+    SELECT property_id
+    FROM property.PROPERTY_VIEWS
+    WHERE session_id = $1 AND user_id IS NULL AND is_liked = TRUE
+    ORDER BY feedback_at DESC NULLS LAST, viewed_at DESC
+    LIMIT $2 OFFSET $3
+    `,
+    [sessionId, limit, offset]
+  );
+  return { propertyIds: idRes.rows.map((r) => r.property_id), total };
+}
+
 export async function bumpSessionActivityAndViews(sessionId: string): Promise<void> {
   await query(
     `

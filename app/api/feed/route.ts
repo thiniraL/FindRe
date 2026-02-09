@@ -144,6 +144,74 @@ function scorePropertyByPreferences(
   return score;
 }
 
+/** Get total count of featured properties matching base filters (e.g. country_id). */
+async function getFeaturedCount(filterBy: string): Promise<number> {
+  const resp = await typesenseSearch<TypesensePropertyDoc>({
+    collection: 'properties',
+    q: '*',
+    queryBy: PROPERTIES_QUERY_BY,
+    filterBy: filterBy ? `${filterBy} && is_featured:=true` : 'is_featured:=true',
+    sortBy: 'featured_rank:asc',
+    page: 1,
+    perPage: 1,
+  });
+  return resp.found;
+}
+
+type FeedItem = {
+  property: {
+    id: number;
+    title: string | null;
+    location: string | null;
+    price: number | null;
+    bedrooms: number | null;
+    bathrooms: number | null;
+    primaryImageUrl: string | null;
+    agent: { id: number; name: string | null; email: string | null; phone: string | null; whatsapp: string | null } | null;
+    isFeatured: boolean;
+    featuredRank: number | null;
+    additionalImageUrls: string[];
+    purposeKey: string | null;
+    isLiked: boolean;
+  };
+};
+
+function docToFeedItem(
+  d: TypesensePropertyDoc,
+  lang: 'en' | 'ar',
+  isFeatured: boolean
+): FeedItem {
+  const locationParts = isFeatured
+    ? [d.address].filter(Boolean)
+    : [d.address, d.community_en, d.area_en, d.city_en].filter(Boolean);
+  const location = locationParts.length ? locationParts.join(', ') : null;
+  return {
+    property: {
+      id: Number(d.property_id),
+      title: lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
+      location,
+      price: d.price ?? null,
+      bedrooms: d.bedrooms ?? null,
+      bathrooms: d.bathrooms ?? null,
+      primaryImageUrl: d.primary_image_url ?? null,
+      agent: d.agent_id
+        ? {
+            id: d.agent_id,
+            name: d.agent_name ?? null,
+            email: d.agent_email ?? null,
+            phone: d.agent_phone ?? null,
+            whatsapp: d.agent_whatsapp ?? null,
+          }
+        : null,
+      isFeatured,
+      featuredRank: isFeatured ? (d.featured_rank ?? null) : null,
+      additionalImageUrls: d.additional_image_urls ?? [],
+      purposeKey: d.purpose_key ?? null,
+      isLiked: false,
+    },
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const sessionId = getSessionId(request);
@@ -156,147 +224,141 @@ export async function GET(request: NextRequest) {
     const prefs = await getPreferencesForFeed(sessionId);
     const ready = Boolean(prefs?.is_ready_for_recommendations);
 
-    // Fallback: featured-only if preferences missing or not ready
-    const filters: string[] = [];
-    if (countryId) filters.push(`country_id:=${countryId}`);
-
-    // Optional explicit feature filtering from query params
+    // Base filters (country, optional featureKeys)
+    const baseFilters: string[] = [];
+    if (countryId) baseFilters.push(`country_id:=${countryId}`);
     if (featureKeys) {
       const keys = featureKeys
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
       if (keys.length) {
-        filters.push(`features:=[${keys.join(',')}]`);
+        baseFilters.push(`features:=[${keys.join(',')}]`);
       }
     }
+    const baseFilterBy = baseFilters.length ? baseFilters.join(' && ') : '';
 
-    if (!prefs || !ready) {
-      filters.push(`is_featured:=true`);
+    // 1) Featured count
+    const featuredFilterBy = baseFilterBy ? `${baseFilterBy} && is_featured:=true` : 'is_featured:=true';
+    const totalFeatured = await getFeaturedCount(baseFilterBy);
 
+    // 2) Rest filters: non-featured; if preferences ready, add preference filters
+    const restFilters: string[] = [...baseFilters, 'is_featured:=false'];
+    if (ready && prefs) {
+      const minPrice = toNumber(prefs.preferred_price_min);
+      const maxPrice = toNumber(prefs.preferred_price_max);
+      if (minPrice !== null) restFilters.push(`price:>=${minPrice}`);
+      if (maxPrice !== null) restFilters.push(`price:<=${maxPrice}`);
+      if (prefs.preferred_bedrooms_min !== null) restFilters.push(`bedrooms:>=${prefs.preferred_bedrooms_min}`);
+      if (prefs.preferred_bedrooms_max !== null) restFilters.push(`bedrooms:<=${prefs.preferred_bedrooms_max}`);
+      if (prefs.preferred_bathrooms_min !== null) restFilters.push(`bathrooms:>=${prefs.preferred_bathrooms_min}`);
+      if (prefs.preferred_bathrooms_max !== null) restFilters.push(`bathrooms:<=${prefs.preferred_bathrooms_max}`);
+      if (prefs.preferred_purpose_ids?.length) {
+        restFilters.push(`purpose_id:=[${prefs.preferred_purpose_ids.join(',')}]`);
+      }
+      if (prefs.preferred_property_type_ids?.length) {
+        restFilters.push(`property_type_id:=[${prefs.preferred_property_type_ids.join(',')}]`);
+      }
+    }
+    const restFilterBy = restFilters.join(' && ');
+
+    const searchQ = q && q.trim() ? q.trim() : '*';
+
+    // Get rest count (one search with perPage: 1)
+    const restCountResp = await typesenseSearch<TypesensePropertyDoc>({
+      collection: 'properties',
+      q: searchQ,
+      queryBy: PROPERTIES_QUERY_BY,
+      filterBy: restFilterBy,
+      sortBy: 'updated_at:desc',
+      page: 1,
+      perPage: 1,
+    });
+    const totalRest = restCountResp.found;
+    const total = totalFeatured + totalRest;
+
+    const offset = (page - 1) * perPage;
+
+    // 3) Pagination: Case A (featured only), Case B (rest only), Case C (transition)
+    let items: FeedItem[];
+
+    if (offset + perPage <= totalFeatured) {
+      // Case A: full page of featured
+      const featuredPage = Math.floor(offset / perPage) + 1;
       const resp = await typesenseSearch<TypesensePropertyDoc>({
         collection: 'properties',
-        q: q && q.trim() ? q.trim() : '*',
+        q: searchQ,
         queryBy: PROPERTIES_QUERY_BY,
-        filterBy: filters.join(' && '),
+        filterBy: featuredFilterBy,
         sortBy: 'featured_rank:asc',
-        page,
+        page: featuredPage,
         perPage,
       });
-
-      const items = resp.hits.map((h) => {
-        const d = h.document;
-        const locationParts = [d.address].filter(Boolean);
-        const location = locationParts.length ? locationParts.join(', ') : null;
-        return {
-          property: {
-            id: Number(d.property_id),
-            title: lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
-            location,
-            price: d.price ?? null,
-            bedrooms: d.bedrooms ?? null,
-            bathrooms: d.bathrooms ?? null,
-            primaryImageUrl: d.primary_image_url ?? null,
-            agent: d.agent_id
-              ? {
-                  id: d.agent_id,
-                  name: d.agent_name ?? null,
-                  email: d.agent_email ?? null,
-                  phone: d.agent_phone ?? null,
-                  whatsapp: d.agent_whatsapp ?? null,
-                }
-              : null,
-            isFeatured: Boolean(d.is_featured),
-            featuredRank: d.featured_rank ?? null,
-            additionalImageUrls: d.additional_image_urls ?? [],
-            purposeKey: d.purpose_key ?? null,
-            isLiked: false,
-          }
-        };
+      items = resp.hits.map((h) => docToFeedItem(h.document, lang, true));
+    } else if (offset >= totalFeatured) {
+      // Case B: full page of rest
+      const restOffset = offset - totalFeatured;
+      const restPage = Math.floor(restOffset / perPage) + 1;
+      const resp = await typesenseSearch<TypesensePropertyDoc>({
+        collection: 'properties',
+        q: searchQ,
+        queryBy: PROPERTIES_QUERY_BY,
+        filterBy: restFilterBy,
+        sortBy: 'updated_at:desc',
+        page: restPage,
+        perPage,
       });
+      let hits = resp.hits;
+      if (ready && prefs) {
+        const counters = (prefs.preference_counters ?? null) as PreferenceCounters | null;
+        hits = resp.hits
+          .map((h) => ({ hit: h, personalScore: scorePropertyByPreferences(h.document, counters) }))
+          .sort((a, b) => b.personalScore - a.personalScore)
+          .map((x) => x.hit);
+      }
+      items = hits.map((h) => docToFeedItem(h.document, lang, false));
+    } else {
+      // Case C: transition (featured slice + rest slice)
+      const featuredCount = Math.min(perPage, totalFeatured - offset);
+      const restCount = perPage - featuredCount;
 
-      const propertyIds = items.map((i) => i.property.id);
-      const viewStatusMap = await getPropertyViewStatus(propertyIds, sessionId, userId);
-      items.forEach((item) => {
-        const status = viewStatusMap.get(item.property.id);
-        if (status) {
-          item.property.isLiked = status.isLiked;
+      const featuredPage = Math.floor(offset / perPage) + 1;
+      const featuredResp = await typesenseSearch<TypesensePropertyDoc>({
+        collection: 'properties',
+        q: searchQ,
+        queryBy: PROPERTIES_QUERY_BY,
+        filterBy: featuredFilterBy,
+        sortBy: 'featured_rank:asc',
+        page: featuredPage,
+        perPage,
+      });
+      const sliceStart = offset - (featuredPage - 1) * perPage;
+      const featuredSlice = featuredResp.hits.slice(sliceStart, sliceStart + featuredCount);
+      let restHits: Array<{ document: TypesensePropertyDoc }> = [];
+      if (restCount > 0) {
+        const restResp = await typesenseSearch<TypesensePropertyDoc>({
+          collection: 'properties',
+          q: searchQ,
+          queryBy: PROPERTIES_QUERY_BY,
+          filterBy: restFilterBy,
+          sortBy: 'updated_at:desc',
+          page: 1,
+          perPage: restCount,
+        });
+        restHits = restResp.hits;
+        if (ready && prefs) {
+          const counters = (prefs.preference_counters ?? null) as PreferenceCounters | null;
+          restHits = restResp.hits
+            .map((h) => ({ hit: h, personalScore: scorePropertyByPreferences(h.document, counters) }))
+            .sort((a, b) => b.personalScore - a.personalScore)
+            .map((x) => x.hit);
         }
-      });
-
-      return createPaginatedResponse(items, page, perPage, resp.found);
+      }
+      items = [
+        ...featuredSlice.map((h) => docToFeedItem(h.document, lang, true)),
+        ...restHits.map((h) => docToFeedItem(h.document, lang, false)),
+      ];
     }
-
-    // Preference-based search
-    const minPrice = toNumber(prefs.preferred_price_min);
-    const maxPrice = toNumber(prefs.preferred_price_max);
-    if (minPrice !== null) filters.push(`price:>=${minPrice}`);
-    if (maxPrice !== null) filters.push(`price:<=${maxPrice}`);
-    if (prefs.preferred_bedrooms_min !== null) filters.push(`bedrooms:>=${prefs.preferred_bedrooms_min}`);
-    if (prefs.preferred_bedrooms_max !== null) filters.push(`bedrooms:<=${prefs.preferred_bedrooms_max}`);
-    if (prefs.preferred_bathrooms_min !== null) filters.push(`bathrooms:>=${prefs.preferred_bathrooms_min}`);
-    if (prefs.preferred_bathrooms_max !== null) filters.push(`bathrooms:<=${prefs.preferred_bathrooms_max}`);
-
-    if (prefs.preferred_purpose_ids?.length) {
-      filters.push(`purpose_id:=[${prefs.preferred_purpose_ids.join(',')}]`);
-    }
-    if (prefs.preferred_property_type_ids?.length) {
-      filters.push(`property_type_id:=[${prefs.preferred_property_type_ids.join(',')}]`);
-    }
-    // Location is searched via `q` + `address` instead of filtering by location_id.
-    // Feature IDs from preferences are not used here because `properties.features` is now string[] (feature keys).
-
-    const resp = await typesenseSearch<TypesensePropertyDoc>({
-      collection: 'properties',
-      q: q && q.trim() ? q.trim() : '*',
-      queryBy: PROPERTIES_QUERY_BY,
-      filterBy: filters.length ? filters.join(' && ') : undefined,
-      // updated_at is a secondary sort; primary sort happens in-memory using preference_counters.
-      sortBy: 'updated_at:desc',
-      page,
-      perPage,
-    });
-
-    const counters = (prefs.preference_counters ?? null) as PreferenceCounters | null;
-
-    const rankedHits = resp.hits
-      .map((h) => {
-        const d = h.document;
-        const personalScore = scorePropertyByPreferences(d, counters);
-        return { hit: h, personalScore };
-      })
-      .sort((a, b) => b.personalScore - a.personalScore)
-      .map((x) => x.hit);
-
-    const items = rankedHits.map((h) => {
-      const d = h.document;
-      const locationParts = [d.address, d.community_en, d.area_en, d.city_en].filter(Boolean);
-      const location = locationParts.length ? locationParts.join(', ') : null;
-      return {
-        property: {
-          id: Number(d.property_id),
-          title:
-            lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
-          location,
-          price: d.price ?? null,
-          bedrooms: d.bedrooms ?? null,
-          bathrooms: d.bathrooms ?? null,
-          primaryImageUrl: d.primary_image_url ?? null,
-          agent: d.agent_id
-            ? {
-                id: d.agent_id,
-                name: d.agent_name ?? null,
-                email: d.agent_email ?? null,
-                phone: d.agent_phone ?? null,
-                whatsapp: d.agent_whatsapp ?? null,
-              }
-            : null,
-          additionalImageUrls: d.additional_image_urls ?? [],
-          purposeKey: d.purpose_key ?? null,
-          isLiked: false,
-        },
-      };
-    });
 
     const propertyIds = items.map((i) => i.property.id);
     const viewStatusMap = await getPropertyViewStatus(propertyIds, sessionId, userId);
@@ -307,7 +369,7 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    return createPaginatedResponse(items, page, perPage, resp.found);
+    return createPaginatedResponse(items, page, perPage, total);
   } catch (error) {
     return createErrorResponse(error);
   }

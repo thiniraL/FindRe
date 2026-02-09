@@ -48,6 +48,8 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'purpose_id', type: 'int32', facet: true, optional: true },
     { name: 'purpose_key', type: 'string', facet: true, optional: true },
     { name: 'property_type_id', type: 'int32', facet: true, optional: true },
+    { name: 'property_type_ids', type: 'int32[]', facet: true, optional: true },
+    { name: 'main_property_type_ids', type: 'int32[]', facet: true, optional: true },
     { name: 'price', type: 'float', facet: true, optional: true },
     { name: 'currency_id', type: 'int32', facet: true, optional: true },
     { name: 'bedrooms', type: 'int32', facet: true, optional: true },
@@ -56,7 +58,8 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'area_sqm', type: 'float', facet: true, optional: true },
     // Location search uses `address` (text) instead of location_id filtering
     { name: 'address', type: 'string', optional: true },
-    // Feature keys, e.g. ["pool","air_conditioning"]
+    // Feature IDs (filter by feature_ids); keys kept for display if needed
+    { name: 'feature_ids', type: 'int32[]', facet: true, optional: true },
     { name: 'features', type: 'string[]', facet: true, optional: true },
     { name: 'agent_id', type: 'int32', facet: true, optional: true },
     { name: 'status', type: 'string', facet: true, optional: true },

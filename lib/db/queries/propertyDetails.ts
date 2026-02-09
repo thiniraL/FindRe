@@ -76,8 +76,9 @@ export async function getPropertyById(
       pd.area_sqm::float AS area_sqm,
       pd.area_sqft::float AS area_sqft,
       (
-        SELECT COALESCE(array_agg(elem), '{}')
-        FROM jsonb_array_elements_text(COALESCE(pd.features, '[]'::jsonb)) AS elem
+        SELECT COALESCE(array_agg(f.feature_key ORDER BY f.feature_id), '{}')
+        FROM unnest(COALESCE(pd.feature_ids, '{}')) AS fid
+        JOIN property.FEATURES f ON f.feature_id = fid
       ) AS features_jsonb,
       a.agent_id,
       a.agent_name,
@@ -101,7 +102,7 @@ export async function getPropertyById(
     LEFT JOIN property.PROPERTY_DETAILS pd ON pd.property_id = p.property_id
     JOIN master.CURRENCIES c ON c.currency_id = p.currency_id
     JOIN property.PURPOSES pur ON pur.purpose_id = p.purpose_id
-    JOIN property.PROPERTY_TYPES pt ON pt.type_id = p.property_type_id
+    LEFT JOIN property.PROPERTY_TYPES pt ON cardinality(p.property_type_ids) > 0 AND pt.type_id = (p.property_type_ids)[1]
     LEFT JOIN business.AGENTS a ON a.agent_id = p.agent_id
     LEFT JOIN LATERAL (
       SELECT COALESCE(pi.compressed_image_url, pi.image_url) AS image_url

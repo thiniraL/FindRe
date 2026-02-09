@@ -135,17 +135,18 @@ export const searchQuerySchema = z.object({
   location: z.string().optional(),
   /** 'all' = no filter; any other value filters by completion_status (distinct from property table) */
   completionStatus: z.string().optional(),
-  propertyTypeIds: z.string().optional(), // comma-separated IDs
+  mainPropertyTypeIds: z.string().optional(), // comma-separated main type IDs
+  propertyTypeIds: z.string().optional(), // comma-separated IDs (sub/property types)
   bedrooms: z.string().optional(), // comma-separated, e.g. "1,2,3"
   bathrooms: z.string().optional(), // comma-separated, e.g. "2,3"
   priceMin: z.coerce.number().min(0).optional(),
   priceMax: z.coerce.number().min(0).optional(),
   areaMin: z.coerce.number().min(0).optional(),
   areaMax: z.coerce.number().min(0).optional(),
-  areaUnit: z.enum(['sqm', 'sqft']).optional(),
-  keyword: z.string().optional(),
-  agentIds: z.string().optional(), // comma-separated IDs
-  featureKeys: z.string().optional(), // comma-separated keys
+    /** Single string or comma-separated keywords, e.g. "beach,golf,marina" */
+    keyword: z.string().optional(),
+    agentIds: z.string().optional(), // comma-separated IDs
+  featureIds: z.string().optional(), // comma-separated feature IDs
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
@@ -158,6 +159,7 @@ export const searchBodySchema = z
     countryId: z.coerce.number().int().min(1).optional(),
     location: z.string().optional(),
     completionStatus: z.array(z.string()).optional(),
+    mainPropertyTypeIds: z.array(z.number().int().min(1)).optional(),
     propertyTypeIds: z.array(z.number().int().min(1)).optional(),
     bedrooms: z.array(z.number().int().min(0)).optional(),
     bathrooms: z.array(z.number().int().min(1)).optional(),
@@ -165,10 +167,10 @@ export const searchBodySchema = z
     priceMax: z.number().min(0).optional(),
     areaMin: z.number().min(0).optional(),
     areaMax: z.number().min(0).optional(),
-    areaUnit: z.enum(['sqm', 'sqft']).optional(),
-    keyword: z.string().optional(),
+    /** Keywords: string or array e.g. ["beach", "golf", "marina"]; joined to one search string */
+    keyword: z.union([z.string(), z.array(z.string())]).optional(),
     agentIds: z.array(z.number().int().min(1)).optional(),
-    featureKeys: z.array(z.string()).optional(),
+    featureIds: z.array(z.number().int().min(1)).optional(),
     page: z.number().int().min(1).optional(),
     limit: z.number().int().min(1).max(100).optional(),
   })

@@ -14,7 +14,9 @@ export type SearchFilterState = {
   completionStatus?: string;
   /** Completion: multiple values for POST body, filter by completion_status */
   completionStatuses?: string[];
-  /** Property type IDs (Typesense property_type_id) */
+  /** Main property type IDs (Residential, Commercial); filter by main_property_type_ids */
+  mainPropertyTypeIds?: number[];
+  /** Property type IDs (sub types; Typesense property_type_id or property_type_ids) */
   propertyTypeIds?: number[];
   /** Beds: discrete values (0=Studio, 1,2,3...) */
   bedrooms?: number[];
@@ -23,16 +25,15 @@ export type SearchFilterState = {
   /** Price range */
   priceMin?: number;
   priceMax?: number;
-  /** Area range; unit determines field (area_sqm | area_sqft) */
+  /** Area range (always sqm) */
   areaMin?: number;
   areaMax?: number;
-  areaUnit?: 'sqm' | 'sqft';
   /** Keyword → appended to full-text q */
   keyword?: string;
   /** Agent IDs (one or more) */
   agentIds?: number[];
-  /** Feature keys from PROPERTY_DETAILS.features, e.g. ["pool", "garden"] */
-  featureKeys?: string[];
+  /** Feature IDs from PROPERTY_DETAILS.feature_ids */
+  featureIds?: number[];
 };
 
 function escapeFilterValue(value: string): string {
@@ -60,6 +61,9 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
   } else if (state.completionStatus && state.completionStatus !== 'all') {
     parts.push(`completion_status:=${escapeFilterValue(state.completionStatus)}`);
   }
+  if (state.mainPropertyTypeIds?.length) {
+    parts.push(`main_property_type_ids:=[${state.mainPropertyTypeIds.join(',')}]`);
+  }
   if (state.propertyTypeIds?.length) {
     parts.push(`property_type_id:=[${state.propertyTypeIds.join(',')}]`);
   }
@@ -75,19 +79,17 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
   if (state.priceMax != null) {
     parts.push(`price:<=${state.priceMax}`);
   }
-  const areaField = state.areaUnit === 'sqft' ? 'area_sqft' : 'area_sqm';
   if (state.areaMin != null && state.areaMin > 0) {
-    parts.push(`${areaField}:>=${state.areaMin}`);
+    parts.push(`area_sqm:>=${state.areaMin}`);
   }
   if (state.areaMax != null) {
-    parts.push(`${areaField}:<=${state.areaMax}`);
+    parts.push(`area_sqm:<=${state.areaMax}`);
   }
   if (state.agentIds?.length) {
     parts.push(`agent_id:=[${state.agentIds.join(',')}]`);
   }
-  if (state.featureKeys?.length) {
-    const safe = state.featureKeys.map((k) => /^[a-z0-9_]+$/i.test(k) ? k : `"${escapeFilterValue(k)}"`).join(',');
-    parts.push(`features:=[${safe}]`);
+  if (state.featureIds?.length) {
+    parts.push(`feature_ids:=[${state.featureIds.join(',')}]`);
   }
 
   if (parts.length === 0) return undefined;

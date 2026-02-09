@@ -3,6 +3,11 @@
 -- Description: Insert default search filter configurations for Buy/Rent purposes
 --              with filters matching the FindRE UI: location, completion, property type,
 --              bedrooms, bathrooms, price, area, keyword, agent
+--
+-- Search API alignment: Each filter "id" must match the key used in GET /api/search
+-- query params and POST body. See lib/search/filterConfigToSearchKeys.ts.
+-- - Single-key filters: id = param/body key (e.g. id "mainPropertyTypeIds" -> mainPropertyTypeIds).
+-- - Range filters: id "price" -> priceMin, priceMax; id "area" -> areaMin, areaMax (area always sqm).
 
 BEGIN;
 
@@ -30,206 +35,95 @@ VALUES (
                 "order": 1
             },
             {
-                "id": "completion_status",
+                "id": "completionStatus",
                 "name": "Completion Status",
                 "type": "checkbox-group",
                 "options": [
                     {
                         "value": "all",
-                        "label": "All",
-                        "enabled": true
-                    },
+                        "label": "All"                    },
                     {
                         "value": "ready",
-                        "label": "Ready",
-                        "enabled": true
-                    },
+                        "label": "Ready"                    },
                     {
                         "value": "off_plan",
-                        "label": "Off-plan",
-                        "enabled": true
-                    }
+                        "label": "Off-plan"                    }
                 ],
                 "order": 2
             },
             {
-                "id": "property_type",
-                "name": "Property Type",
-                "type": "checkbox-group",
-                "options": [
-                    {
-                        "value": "residential",
-                        "label": "Residential",
-                        "enabled": true
-                    },
-                    {
-                        "value": "commercial",
-                        "label": "Commercial",
-                        "enabled": true
-                    },
-                    {
-                        "value": "land",
-                        "label": "Land",
-                        "enabled": true
-                    },
-                    {
-                        "value": "mixed_use",
-                        "label": "Mixed Use",
-                        "enabled": true
-                    }
-                ],
+                "id": "mainPropertyTypeIds",
+                "name": "Property type",
+                "type": "radio",
+                "options": [],
                 "order": 3
             },
             {
-                "id": "property_subtype",
-                "name": "Property Subtype",
+                "id": "propertyTypeIds",
+                "name": "Property Type",
                 "type": "checkbox-group",
-                "options": [
-                    {
-                        "value": "apartment",
-                        "label": "Apartment",
-                        "parentType": "residential",
-                        "enabled": true
-                    },
-                    {
-                        "value": "villa",
-                        "label": "Villa",
-                        "parentType": "residential",
-                        "enabled": true
-                    },
-                    {
-                        "value": "townhouse",
-                        "label": "Townhouse",
-                        "parentType": "residential",
-                        "enabled": true
-                    },
-                    {
-                        "value": "penthouse",
-                        "label": "Penthouse",
-                        "parentType": "residential",
-                        "enabled": true
-                    },
-                    {
-                        "value": "office",
-                        "label": "Office",
-                        "parentType": "commercial",
-                        "enabled": true
-                    },
-                    {
-                        "value": "retail",
-                        "label": "Retail",
-                        "parentType": "commercial",
-                        "enabled": true
-                    },
-                    {
-                        "value": "warehouse",
-                        "label": "Warehouse",
-                        "parentType": "commercial",
-                        "enabled": true
-                    }
-                ],
+                "options": [],
                 "order": 4,
-                "conditional": true,
-                "dependsOn": "property_type"
+                "dependsOn": "mainPropertyTypeIds"
             },
             {
                 "id": "bedrooms",
                 "name": "Beds",
-                "type": "range",
-                "min": 0,
-                "max": 5,
-                "step": 1,
-                "defaultMin": 0,
-                "defaultMax": 5,
-                "options": [
-                    {"value": 0, "label": "Studio"},
-                    {"value": 1, "label": "1"},
-                    {"value": 2, "label": "2"},
-                    {"value": 3, "label": "3"},
-                    {"value": 4, "label": "4"},
-                    {"value": 5, "label": "5"},
-                    {"value": 6, "label": "6+", "isPlus": true}
-                ],
-                "order": 5
+                "type": "checkbox-group",
+                "options": [],
+                "order": 6
             },
             {
                 "id": "bathrooms",
                 "name": "Baths",
-                "type": "range",
-                "min": 1,
-                "max": 5,
-                "step": 1,
-                "defaultMin": 1,
-                "defaultMax": 5,
-                "options": [
-                    {"value": 1, "label": "1"},
-                    {"value": 2, "label": "2"},
-                    {"value": 3, "label": "3"},
-                    {"value": 4, "label": "4"},
-                    {"value": 5, "label": "5"},
-                    {"value": 6, "label": "6+", "isPlus": true}
-                ],
-                "order": 6
+                "type": "checkbox-group",
+                "options": [],
+                "order": 7
             },
             {
                 "id": "price",
                 "name": "Price",
                 "type": "range-slider",
                 "currency": "USD",
-                "currencyOptions": ["USD", "EUR"],
                 "min": 50000,
                 "max": 800000,
-                "step": 5000,
                 "defaultMin": 50000,
                 "defaultMax": 800000,
-                "displayFormat": "currency",
-                "order": 7
+                "order": 8
             },
             {
                 "id": "area",
                 "name": "Area",
                 "type": "range",
                 "unit": "sqm",
-                "unitOptions": ["sqm", "sqft"],
                 "min": 0,
                 "max": 10000,
-                "step": 100,
                 "defaultMin": 0,
                 "defaultMax": 10000,
-                "order": 8
+                "order": 9
             },
             {
                 "id": "keyword",
                 "name": "Keyword",
-                "type": "text",
-                "placeholder": "Add relevant keywords",
-                "searchable": true,
-                "order": 9
-            },
-            {
-                "id": "agent_or_agency",
-                "name": "Agent or Agency",
-                "type": "select",
-                "placeholder": "Select an agent or agency",
-                "searchable": true,
-                "multiSelect": false,
+                "type": "checkbox-group",
+                "options": [],
                 "order": 10
             },
             {
-                "id": "features",
+                "id": "agentIds",
+                "name": "Agent or Agency",
+                "type": "dropdown",
+                "placeholder": "Select an agent or agency",
+                "searchable": true,
+                "multiSelect": false,
+                "order": 11
+            },
+            {
+                "id": "featureIds",
                 "name": "Features",
                 "type": "checkbox-group",
-                "options": [
-                    {"value": "pool", "label": "Pool", "enabled": true},
-                    {"value": "garden", "label": "Garden", "enabled": true},
-                    {"value": "garage", "label": "Garage", "enabled": true},
-                    {"value": "balcony", "label": "Balcony", "enabled": true},
-                    {"value": "elevator", "label": "Elevator", "enabled": true},
-                    {"value": "ac", "label": "Air Conditioning", "enabled": true},
-                    {"value": "fireplace", "label": "Fireplace", "enabled": true},
-                    {"value": "security", "label": "Security System", "enabled": true}
-                ],
-                "order": 11
+                "options": [],
+                "order": 12
             }
         ],
         "meta": {
@@ -262,132 +156,92 @@ VALUES (
                 "order": 1
             },
             {
-                "id": "completion_status",
+                "id": "completionStatus",
                 "name": "Availability",
                 "type": "checkbox-group",
                 "options": [
                     {
                         "value": "available_now",
-                        "label": "Available Now",
-                        "enabled": true
-                    },
+                        "label": "Available Now"                    },
                     {
                         "value": "upcoming",
-                        "label": "Upcoming",
-                        "enabled": true
-                    }
+                        "label": "Upcoming"                    }
                 ],
                 "order": 2
             },
             {
-                "id": "property_type",
+                "id": "mainPropertyTypeIds",
+                "name": "Main Type",
+                "type": "radio",
+                "options": [],
+                "order": 3
+            },
+            {
+                "id": "propertyTypeIds",
                 "name": "Property Type",
                 "type": "checkbox-group",
-                "options": [
-                    {
-                        "value": "apartment",
-                        "label": "Apartment",
-                        "enabled": true
-                    },
-                    {
-                        "value": "villa",
-                        "label": "Villa",
-                        "enabled": true
-                    },
-                    {
-                        "value": "townhouse",
-                        "label": "Townhouse",
-                        "enabled": true
-                    },
-                    {
-                        "value": "house",
-                        "label": "House",
-                        "enabled": true
-                    }
-                ],
-                "order": 3
+                "options": [],
+                "order": 4,
+                "dependsOn": "mainPropertyTypeIds"
             },
             {
                 "id": "bedrooms",
                 "name": "Bedrooms",
-                "type": "range",
-                "min": 1,
-                "max": 5,
-                "step": 1,
-                "defaultMin": 1,
-                "defaultMax": 5,
-                "options": [
-                    {"value": 1, "label": "1"},
-                    {"value": 2, "label": "2"},
-                    {"value": 3, "label": "3"},
-                    {"value": 4, "label": "4"},
-                    {"value": 5, "label": "5"},
-                    {"value": 6, "label": "5+", "isPlus": true}
-                ],
-                "order": 4
+                "type": "checkbox-group",
+                "options": [],
+                "order": 6
             },
             {
                 "id": "bathrooms",
                 "name": "Baths",
-                "type": "range",
-                "min": 1,
-                "max": 5,
-                "step": 1,
-                "defaultMin": 1,
-                "defaultMax": 5,
-                "options": [
-                    {"value": 1, "label": "1"},
-                    {"value": 2, "label": "2"},
-                    {"value": 3, "label": "3"},
-                    {"value": 4, "label": "4"},
-                    {"value": 5, "label": "5"},
-                    {"value": 6, "label": "6+", "isPlus": true}
-                ],
-                "order": 5
+                "type": "checkbox-group",
+                "options": [],
+                "order": 7
             },
             {
                 "id": "price",
                 "name": "Monthly Rent",
                 "type": "range-slider",
                 "currency": "USD",
-                "currencyOptions": ["USD", "EUR"],
                 "min": 500,
                 "max": 5000,
-                "step": 100,
                 "defaultMin": 500,
                 "defaultMax": 5000,
-                "displayFormat": "currency",
-                "order": 6
+                "order": 8
             },
             {
                 "id": "area",
                 "name": "Area",
                 "type": "range",
                 "unit": "sqm",
-                "unitOptions": ["sqm", "sqft"],
                 "min": 0,
                 "max": 10000,
-                "step": 100,
                 "defaultMin": 0,
                 "defaultMax": 10000,
-                "order": 7
+                "order": 9
             },
             {
                 "id": "keyword",
                 "name": "Keyword",
-                "type": "text",
-                "placeholder": "Add relevant keywords",
-                "searchable": true,
-                "order": 8
+                "type": "checkbox-group",
+                "options": [],
+                "order": 10
             },
             {
-                "id": "agent_or_agency",
+                "id": "agentIds",
                 "name": "Agent or Agency",
-                "type": "select",
+                "type": "dropdown",
                 "placeholder": "Select an agent or agency",
                 "searchable": true,
                 "multiSelect": false,
-                "order": 9
+                "order": 11
+            },
+            {
+                "id": "featureIds",
+                "name": "Features",
+                "type": "checkbox-group",
+                "options": [],
+                "order": 12
             }
         ],
         "meta": {
@@ -400,6 +254,7 @@ VALUES (
 SET config_json = EXCLUDED.config_json, updated_at = NOW();
 
 -- Ensure config_json has a "filters" array (structure check)
+-- relname may be lowercase (unquoted) or mixed case (quoted); match case-insensitively
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -407,7 +262,7 @@ BEGIN
     JOIN pg_class t ON t.oid = c.conrelid
     JOIN pg_namespace n ON n.oid = t.relnamespace
     WHERE c.conname = 'chk_search_filter_config_has_filters'
-      AND t.relname = 'SEARCH_FILTER_CONFIGS'
+      AND LOWER(t.relname) = 'search_filter_configs'
       AND n.nspname = 'master'
   ) THEN
     ALTER TABLE master.SEARCH_FILTER_CONFIGS

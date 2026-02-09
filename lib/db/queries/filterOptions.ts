@@ -10,7 +10,10 @@ export type FilterScope = {
   languageCode?: string;
 };
 
-export type OptionItem = { value: string | number; label: string; enabled?: boolean };
+export type OptionItem = { value: string | number; label: string };
+
+/** Option with main type ids; used for property type options so client can filter by selected main type. */
+export type OptionItemWithMainTypes = OptionItem & { mainPropertyTypeIds?: number[] };
 
 export type PropertyCountResult = { count: number; purpose_label: string };
 
@@ -55,7 +58,6 @@ export async function getPropertyCountByPurpose(
 const COMPLETION_STATUS_ALL_OPTION: OptionItem = {
   value: 'all',
   label: 'All',
-  enabled: true,
 };
 
 /**
@@ -82,7 +84,6 @@ export async function getCompletionStatusOptions(
   const dbOptions = res.rows.map((r) => ({
     value: r.completion_status,
     label: humanizeCompletionStatus(r.completion_status),
-    enabled: true,
   }));
   return [COMPLETION_STATUS_ALL_OPTION, ...dbOptions];
 }
@@ -95,17 +96,41 @@ function humanizeCompletionStatus(v: string): string {
 }
 
 /**
- * Property types for property_type and property_subtype filters.
+ * Main property types (e.g. Residential, Commercial) for filter options.
+ */
+export async function getMainPropertyTypesForFilter(
+  languageCode: string = DEFAULT_LANG
+): Promise<OptionItem[]> {
+  const res = await query<{ main_type_id: number; label: string }>(
+    `
+    SELECT
+      main_type_id,
+      COALESCE(name_translations->>$1, name_translations->>'en') AS label
+    FROM property.MAIN_PROPERTY_TYPES
+    ORDER BY main_type_key
+    `,
+    [languageCode]
+  );
+  return res.rows.map((r) => ({
+    value: r.main_type_id,
+    label: r.label || String(r.main_type_id),
+  }));
+}
+
+/**
+ * Property types (sub types) for propertyTypeIds filter.
+ * Each option includes mainPropertyTypeIds so client can filter options by selected main type(s).
  * value = type_id for search API (propertyTypeIds).
  */
 export async function getPropertyTypesForFilter(
   languageCode: string = DEFAULT_LANG
-): Promise<OptionItem[]> {
-  const res = await query<{ type_id: number; label: string }>(
+): Promise<OptionItemWithMainTypes[]> {
+  const res = await query<{ type_id: number; label: string; main_property_type_ids: number[] | null }>(
     `
     SELECT
       type_id,
-      COALESCE(name_translations->>$1, name_translations->>'en') AS label
+      COALESCE(name_translations->>$1, name_translations->>'en') AS label,
+      main_property_type_ids
     FROM property.PROPERTY_TYPES
     ORDER BY type_key
     `,
@@ -114,7 +139,7 @@ export async function getPropertyTypesForFilter(
   return res.rows.map((r) => ({
     value: r.type_id,
     label: r.label || String(r.type_id),
-    enabled: true,
+    mainPropertyTypeIds: r.main_property_type_ids ?? undefined,
   }));
 }
 
@@ -233,33 +258,52 @@ export async function getAreaRange(scope: FilterScope): Promise<RangeResult> {
 }
 
 /**
- * Distinct feature keys from PROPERTY_DETAILS.features (scoped by purpose), with labels from FEATURES.
+ * Distinct feature IDs from PROPERTY_DETAILS.feature_ids (scoped by purpose), with labels from FEATURES.
+ * Used by filter config (featureIds); value = feature_id for search body.
  */
 export async function getFeaturesForFilter(
   scope: FilterScope
 ): Promise<OptionItem[]> {
   const { purposeKey, countryId, languageCode } = scope;
   const lang = languageCode ?? DEFAULT_LANG;
-  const res = await query<{ feature_key: string; label: string | null }>(
+  const res = await query<{ feature_id: number; label: string | null }>(
     `
-    SELECT DISTINCT elem AS feature_key,
+    SELECT DISTINCT f.feature_id,
       COALESCE(f.name_translations->>$3, f.name_translations->>'en') AS label
     FROM property.PROPERTY_DETAILS pd
     JOIN property.PROPERTIES p ON pd.property_id = p.property_id
     JOIN property.PURPOSES pur ON p.purpose_id = pur.purpose_id
     JOIN property.LOCATIONS l ON p.location_id = l.location_id
-    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(pd.features, '[]'::jsonb)) AS elem
-    LEFT JOIN property.FEATURES f ON f.feature_key = elem AND f.is_active = TRUE
+    CROSS JOIN LATERAL unnest(COALESCE(pd.feature_ids, '{}')) AS fid
+    JOIN property.FEATURES f ON f.feature_id = fid AND f.is_active = TRUE
     WHERE pur.purpose_key = $1
       AND ($2::int IS NULL OR l.country_id = $2)
-    ORDER BY label NULLS LAST, feature_key
+    ORDER BY label NULLS LAST, f.feature_id
     `,
     [purposeKey, countryId ?? null, lang]
   );
   return res.rows.map((r) => ({
-    value: r.feature_key,
-    label: r.label || humanizeCompletionStatus(r.feature_key),
-    enabled: true,
+    value: r.feature_id,
+    label: r.label || String(r.feature_id),
+  }));
+}
+
+/**
+ * Keywords from property.KEYWORDS for filter config.
+ * value = keyword_key (pass as search body "keyword" string); label = display_label or keyword_key.
+ */
+export async function getKeywordsForFilter(): Promise<OptionItem[]> {
+  const res = await query<{ keyword_key: string; display_label: string | null }>(
+    `
+    SELECT keyword_key, display_label
+    FROM property.KEYWORDS
+    WHERE is_active = TRUE
+    ORDER BY display_order ASC, keyword_key
+    `
+  );
+  return res.rows.map((r) => ({
+    value: r.keyword_key,
+    label: r.display_label || r.keyword_key,
   }));
 }
 
@@ -296,7 +340,6 @@ export async function getAgentsForFilter(
     return {
       value: r.agent_id,
       label: label || String(r.agent_id),
-      enabled: true,
     };
   });
 }
