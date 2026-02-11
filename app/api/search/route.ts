@@ -77,6 +77,20 @@ function parseOptionalIntList(value: string | undefined): number[] | undefined {
   return parsed.length ? parsed : undefined;
 }
 
+/** Parse comma-separated bedrooms/bathrooms; allows "6+" for 6 or more. */
+function parseBedroomsBathsList(value: string | undefined): (number | string)[] | undefined {
+  if (!value?.trim()) return undefined;
+  const out: (number | string)[] = [];
+  for (const s of value.split(',').map((x) => x.trim()).filter(Boolean)) {
+    if (/^\d+\+$/.test(s)) out.push(s);
+    else {
+      const n = parseInt(s, 10);
+      if (Number.isFinite(n) && n >= 0) out.push(n);
+    }
+  }
+  return out.length ? out : undefined;
+}
+
 /** Normalize keyword to a single search string: array -> join with space; string (comma-separated ok) -> trimmed. */
 function normalizeKeyword(value: string | string[] | undefined): string | undefined {
   if (value == null) return undefined;
@@ -129,8 +143,10 @@ export async function GET(request: NextRequest) {
       completionStatus: parsed.completionStatus,
       mainPropertyTypeIds: parseOptionalIntList(parsed.mainPropertyTypeIds)?.filter((n) => n >= 1),
       propertyTypeIds: parseOptionalIntList(parsed.propertyTypeIds),
-      bedrooms: parseOptionalIntList(parsed.bedrooms),
-      bathrooms: parseOptionalIntList(parsed.bathrooms)?.filter((n) => n >= 1),
+      bedrooms: parseBedroomsBathsList(parsed.bedrooms),
+      bathrooms: parseBedroomsBathsList(parsed.bathrooms)?.filter(
+        (v) => typeof v === 'string' || v >= 1
+      ),
       priceMin: parsed.priceMin,
       priceMax: parsed.priceMax,
       areaMin: parsed.areaMin,

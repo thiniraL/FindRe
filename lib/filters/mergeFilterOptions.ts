@@ -5,8 +5,6 @@ import {
   getCompletionStatusOptions,
   getMainPropertyTypesForFilter,
   getPropertyTypesForFilter,
-  getBedroomsRange,
-  getBathroomsRange,
   getPriceRange,
   getAreaRange,
   getFeaturesForFilter,
@@ -22,19 +20,6 @@ type ConfigWithFilters = Record<string, unknown> & {
 
 function deepClone<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
-}
-
-/** Build checkbox-group options from a numeric range; labelFn(n) gives the display label. */
-function buildRangeOptions(
-  min: number,
-  max: number,
-  labelFn: (n: number) => string
-): Array<{ value: number; label: string }> {
-  const options: Array<{ value: number; label: string }> = [];
-  for (let n = min; n <= max; n++) {
-    options.push({ value: n, label: labelFn(n) });
-  }
-  return options;
 }
 
 /**
@@ -54,8 +39,6 @@ export async function mergeFilterOptions(
     completionOptions,
     mainPropertyTypeOptions,
     propertyTypeOptions,
-    bedroomsRange,
-    bathroomsRange,
     priceRange,
     areaRange,
     featureOptions,
@@ -66,8 +49,6 @@ export async function mergeFilterOptions(
     getCompletionStatusOptions(scope),
     getMainPropertyTypesForFilter(lang),
     getPropertyTypesForFilter(lang),
-    getBedroomsRange(scope),
-    getBathroomsRange(scope),
     getPriceRange(scope),
     getAreaRange(scope),
     getFeaturesForFilter(scope),
@@ -101,22 +82,8 @@ export async function mergeFilterOptions(
         filter.options = propertyTypeOptions;
         break;
       case 'bedrooms':
-        if (bedroomsRange) {
-          filter.options = buildRangeOptions(
-            bedroomsRange.min,
-            bedroomsRange.max,
-            (n) => (n === 0 ? 'Studio' : n >= 6 ? `${n}+` : String(n))
-          );
-        }
-        break;
       case 'bathrooms':
-        if (bathroomsRange) {
-          filter.options = buildRangeOptions(
-            bathroomsRange.min,
-            bathroomsRange.max,
-            (n) => (n >= 6 ? `${n}+` : String(n))
-          );
-        }
+        // Options come from config only (e.g. 1,2,3,4,5,6+). No DB table lookup.
         break;
       case 'price':
         if (priceRange) {

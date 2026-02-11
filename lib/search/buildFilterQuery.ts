@@ -18,10 +18,10 @@ export type SearchFilterState = {
   mainPropertyTypeIds?: number[];
   /** Property type IDs (sub types; Typesense property_type_id or property_type_ids) */
   propertyTypeIds?: number[];
-  /** Beds: discrete values (0=Studio, 1,2,3...) */
-  bedrooms?: number[];
-  /** Baths: discrete values */
-  bathrooms?: number[];
+  /** Beds: discrete values (0=Studio, 1,2,3...) or "6+" for 6 or more */
+  bedrooms?: (number | string)[];
+  /** Baths: discrete values or "6+" for 6 or more */
+  bathrooms?: (number | string)[];
   /** Price range */
   priceMin?: number;
   priceMax?: number;
@@ -38,6 +38,39 @@ export type SearchFilterState = {
 
 function escapeFilterValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/** True if value is a "plus" option (e.g. "6+" means 6 or more). */
+function isPlusValue(v: number | string): v is string {
+  return typeof v === 'string' && /^\d+\+$/.test(v);
+}
+
+/** Parse "6+" -> 6 for use in field:>=N. Returns null if not a valid plus string. */
+function parsePlusMin(v: string): number | null {
+  const n = parseInt(v.replace(/\+$/, ''), 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** Build filter parts for a count field (bedrooms/bathrooms): exact values in =[], plus values as >=N. */
+function buildCountFilterParts(
+  values: (number | string)[] | undefined,
+  field: string
+): string[] {
+  if (!values?.length) return [];
+  const exact: number[] = [];
+  const plusMins: number[] = [];
+  for (const v of values) {
+    if (isPlusValue(v)) {
+      const n = parsePlusMin(v);
+      if (n != null && !plusMins.includes(n)) plusMins.push(n);
+    } else if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
+      exact.push(v);
+    }
+  }
+  const parts: string[] = [];
+  if (exact.length > 0) parts.push(`${field}:=[${exact.join(',')}]`);
+  for (const n of plusMins) parts.push(`${field}:>=${n}`);
+  return parts;
 }
 
 /**
@@ -67,12 +100,12 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
   if (state.propertyTypeIds?.length) {
     parts.push(`property_type_id:=[${state.propertyTypeIds.join(',')}]`);
   }
-  if (state.bedrooms?.length) {
-    parts.push(`bedrooms:=[${state.bedrooms.join(',')}]`);
-  }
-  if (state.bathrooms?.length) {
-    parts.push(`bathrooms:=[${state.bathrooms.join(',')}]`);
-  }
+  const bedroomParts = buildCountFilterParts(state.bedrooms, 'bedrooms');
+  if (bedroomParts.length === 1) parts.push(bedroomParts[0]);
+  else if (bedroomParts.length > 1) parts.push(`(${bedroomParts.join(' || ')})`);
+  const bathroomParts = buildCountFilterParts(state.bathrooms, 'bathrooms');
+  if (bathroomParts.length === 1) parts.push(bathroomParts[0]);
+  else if (bathroomParts.length > 1) parts.push(`(${bathroomParts.join(' || ')})`);
   if (state.priceMin != null && state.priceMin > 0) {
     parts.push(`price:>=${state.priceMin}`);
   }

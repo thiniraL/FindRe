@@ -6,7 +6,6 @@ import {
 } from '@/lib/utils/errors';
 import { filtersQuerySchema, validateQuery } from '@/lib/security/validation';
 import { getFilterConfigByPurpose } from '@/lib/db/queries/filters';
-import { mergeFilterOptions } from '@/lib/filters/mergeFilterOptions';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,23 +13,21 @@ const DEFAULT_COUNTRY_ID = 1;
 const DEFAULT_CURRENCY_ID = 1;
 const DEFAULT_LANGUAGE_CODE = 'en';
 
+/**
+ * GET /api/filters returns stored config_json (options already in JSONB).
+ * Options are kept up to date by the filter-config-refresh Edge Function;
+ * no merge at request time for faster response.
+ */
 export async function GET(request: NextRequest) {
   try {
     const parsed = validateQuery(request, filtersQuerySchema);
     const { purpose, countryId, currencyId, languageCode } = parsed;
 
-    const scope = {
+    const config = await getFilterConfigByPurpose({
       purposeKey: purpose,
       countryId: countryId ?? DEFAULT_COUNTRY_ID,
       currencyId: currencyId ?? DEFAULT_CURRENCY_ID,
       languageCode: languageCode ?? DEFAULT_LANGUAGE_CODE,
-    };
-
-    const config = await getFilterConfigByPurpose({
-      purposeKey: scope.purposeKey,
-      countryId: scope.countryId,
-      currencyId: scope.currencyId,
-      languageCode: scope.languageCode,
     });
 
     if (!config) {
@@ -41,15 +38,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const mergedConfig = await mergeFilterOptions(config, scope);
-
     return createSuccessResponse({
       purposeKey: config.purpose_key,
       countryId: config.country_id,
       currencyId: config.currency_id,
       languageCode: config.language_code,
       version: config.version,
-      config: mergedConfig,
+      config: config.config_json,
     });
   } catch (error) {
     return createErrorResponse(error);

@@ -88,16 +88,6 @@ type PreferenceCounters = {
   features?: Record<string, number>;
 };
 
-function toNumber(v: unknown): number | null {
-  if (v === null || v === undefined) return null;
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  if (typeof v === 'string') {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
 function bucketPrice(price: number | null | undefined): string | null {
   if (price == null) return null;
   if (price < 1_000_000) return '0-1000000';
@@ -145,13 +135,14 @@ function scorePropertyByPreferences(
 }
 
 /** Get total count of featured properties matching base filters (e.g. country_id). */
-async function getFeaturedCount(filterBy: string): Promise<number> {
+async function getFoundCount(filterBy: string, q: string): Promise<number> {
   const resp = await typesenseSearch<TypesensePropertyDoc>({
     collection: 'properties',
-    q: '*',
+    q,
     queryBy: PROPERTIES_QUERY_BY,
-    filterBy: filterBy ? `${filterBy} && is_featured:=true` : 'is_featured:=true',
-    sortBy: 'featured_rank:asc',
+    filterBy,
+    // Any stable sort is fine for "found" (we only request 1 hit)
+    sortBy: 'updated_at:desc',
     page: 1,
     perPage: 1,
   });
@@ -212,6 +203,58 @@ function docToFeedItem(
   };
 }
 
+function rerankHitsByPreferences(
+  hits: Array<{ document: TypesensePropertyDoc }>,
+  counters: PreferenceCounters | null
+): Array<{ document: TypesensePropertyDoc }> {
+  if (!counters) return hits;
+  return hits
+    .map((h) => ({
+      hit: h,
+      personalScore: scorePropertyByPreferences(h.document, counters),
+      updatedAt: h.document.updated_at ?? 0,
+      propertyId: Number(h.document.property_id) || 0,
+    }))
+    .sort((a, b) => {
+      // Higher personal score first
+      if (b.personalScore !== a.personalScore) return b.personalScore - a.personalScore;
+      // Then newer updates first (stable-ish pagination)
+      if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
+      // Finally, deterministic tie-breaker
+      return b.propertyId - a.propertyId;
+    })
+    .map((x) => x.hit);
+}
+
+async function searchRestPage(params: {
+  q: string;
+  filterBy: string;
+  restOffset: number;
+  perPage: number;
+  counters: PreferenceCounters | null;
+}): Promise<Array<{ document: TypesensePropertyDoc }>> {
+  const { q, filterBy, restOffset, perPage, counters } = params;
+
+  // Fetch a window that covers the desired offset, rerank inside that window, then slice.
+  // This avoids "preferences as hard filters" while keeping pagination deterministic.
+  const windowSize = Math.min(250, Math.max(perPage * 5, perPage)); // cap to reduce load
+  const windowPage = Math.floor(restOffset / windowSize) + 1;
+  const windowStart = restOffset - (windowPage - 1) * windowSize;
+
+  const resp = await typesenseSearch<TypesensePropertyDoc>({
+    collection: 'properties',
+    q,
+    queryBy: PROPERTIES_QUERY_BY,
+    filterBy,
+    sortBy: 'updated_at:desc',
+    page: windowPage,
+    perPage: windowSize,
+  });
+
+  const reranked = rerankHitsByPreferences(resp.hits, counters);
+  return reranked.slice(windowStart, windowStart + perPage);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const sessionId = getSessionId(request);
@@ -238,43 +281,18 @@ export async function GET(request: NextRequest) {
     }
     const baseFilterBy = baseFilters.length ? baseFilters.join(' && ') : '';
 
-    // 1) Featured count
-    const featuredFilterBy = baseFilterBy ? `${baseFilterBy} && is_featured:=true` : 'is_featured:=true';
-    const totalFeatured = await getFeaturedCount(baseFilterBy);
-
-    // 2) Rest filters: non-featured; if preferences ready, add preference filters
-    const restFilters: string[] = [...baseFilters, 'is_featured:=false'];
-    if (ready && prefs) {
-      const minPrice = toNumber(prefs.preferred_price_min);
-      const maxPrice = toNumber(prefs.preferred_price_max);
-      if (minPrice !== null) restFilters.push(`price:>=${minPrice}`);
-      if (maxPrice !== null) restFilters.push(`price:<=${maxPrice}`);
-      if (prefs.preferred_bedrooms_min !== null) restFilters.push(`bedrooms:>=${prefs.preferred_bedrooms_min}`);
-      if (prefs.preferred_bedrooms_max !== null) restFilters.push(`bedrooms:<=${prefs.preferred_bedrooms_max}`);
-      if (prefs.preferred_bathrooms_min !== null) restFilters.push(`bathrooms:>=${prefs.preferred_bathrooms_min}`);
-      if (prefs.preferred_bathrooms_max !== null) restFilters.push(`bathrooms:<=${prefs.preferred_bathrooms_max}`);
-      if (prefs.preferred_purpose_ids?.length) {
-        restFilters.push(`purpose_id:=[${prefs.preferred_purpose_ids.join(',')}]`);
-      }
-      if (prefs.preferred_property_type_ids?.length) {
-        restFilters.push(`property_type_id:=[${prefs.preferred_property_type_ids.join(',')}]`);
-      }
-    }
-    const restFilterBy = restFilters.join(' && ');
-
     const searchQ = q && q.trim() ? q.trim() : '*';
 
-    // Get rest count (one search with perPage: 1)
-    const restCountResp = await typesenseSearch<TypesensePropertyDoc>({
-      collection: 'properties',
-      q: searchQ,
-      queryBy: PROPERTIES_QUERY_BY,
-      filterBy: restFilterBy,
-      sortBy: 'updated_at:desc',
-      page: 1,
-      perPage: 1,
-    });
-    const totalRest = restCountResp.found;
+    // 1) Featured count (MUST use same q as the page fetch, otherwise pagination can drift)
+    const featuredFilterBy = baseFilterBy ? `${baseFilterBy} && is_featured:=true` : 'is_featured:=true';
+    const totalFeatured = await getFoundCount(featuredFilterBy, searchQ);
+
+    // 2) Rest filters: always include non-featured. Preferences should rerank, not hard-filter.
+    const restFilters: string[] = [...baseFilters, 'is_featured:=false'];
+    const restFilterBy = restFilters.join(' && ');
+
+    // Rest count (same q + same filterBy)
+    const totalRest = await getFoundCount(restFilterBy, searchQ);
     const total = totalFeatured + totalRest;
 
     const offset = (page - 1) * perPage;
@@ -298,24 +316,15 @@ export async function GET(request: NextRequest) {
     } else if (offset >= totalFeatured) {
       // Case B: full page of rest
       const restOffset = offset - totalFeatured;
-      const restPage = Math.floor(restOffset / perPage) + 1;
-      const resp = await typesenseSearch<TypesensePropertyDoc>({
-        collection: 'properties',
+      const counters =
+        ready && prefs ? ((prefs.preference_counters ?? null) as PreferenceCounters | null) : null;
+      const hits = await searchRestPage({
         q: searchQ,
-        queryBy: PROPERTIES_QUERY_BY,
         filterBy: restFilterBy,
-        sortBy: 'updated_at:desc',
-        page: restPage,
+        restOffset,
         perPage,
+        counters,
       });
-      let hits = resp.hits;
-      if (ready && prefs) {
-        const counters = (prefs.preference_counters ?? null) as PreferenceCounters | null;
-        hits = resp.hits
-          .map((h) => ({ hit: h, personalScore: scorePropertyByPreferences(h.document, counters) }))
-          .sort((a, b) => b.personalScore - a.personalScore)
-          .map((x) => x.hit);
-      }
       items = hits.map((h) => docToFeedItem(h.document, lang, false));
     } else {
       // Case C: transition (featured slice + rest slice)
@@ -336,23 +345,15 @@ export async function GET(request: NextRequest) {
       const featuredSlice = featuredResp.hits.slice(sliceStart, sliceStart + featuredCount);
       let restHits: Array<{ document: TypesensePropertyDoc }> = [];
       if (restCount > 0) {
-        const restResp = await typesenseSearch<TypesensePropertyDoc>({
-          collection: 'properties',
+        const counters =
+          ready && prefs ? ((prefs.preference_counters ?? null) as PreferenceCounters | null) : null;
+        restHits = await searchRestPage({
           q: searchQ,
-          queryBy: PROPERTIES_QUERY_BY,
           filterBy: restFilterBy,
-          sortBy: 'updated_at:desc',
-          page: 1,
+          restOffset: 0,
           perPage: restCount,
+          counters,
         });
-        restHits = restResp.hits;
-        if (ready && prefs) {
-          const counters = (prefs.preference_counters ?? null) as PreferenceCounters | null;
-          restHits = restResp.hits
-            .map((h) => ({ hit: h, personalScore: scorePropertyByPreferences(h.document, counters) }))
-            .sort((a, b) => b.personalScore - a.personalScore)
-            .map((x) => x.hit);
-        }
       }
       items = [
         ...featuredSlice.map((h) => docToFeedItem(h.document, lang, true)),

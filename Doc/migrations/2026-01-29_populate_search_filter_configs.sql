@@ -70,14 +70,29 @@ VALUES (
                 "id": "bedrooms",
                 "name": "Beds",
                 "type": "checkbox-group",
-                "options": [],
+                "options": [
+                    { "value": 0, "label": "Studio" },
+                    { "value": 1, "label": "1" },
+                    { "value": 2, "label": "2" },
+                    { "value": 3, "label": "3" },
+                    { "value": 4, "label": "4" },
+                    { "value": 5, "label": "5" },
+                    { "value": "6+", "label": "6+" }
+                ],
                 "order": 6
             },
             {
                 "id": "bathrooms",
                 "name": "Baths",
                 "type": "checkbox-group",
-                "options": [],
+                "options": [
+                    { "value": 1, "label": "1" },
+                    { "value": 2, "label": "2" },
+                    { "value": 3, "label": "3" },
+                    { "value": 4, "label": "4" },
+                    { "value": 5, "label": "5" },
+                    { "value": "6+", "label": "6+" }
+                ],
                 "order": 7
             },
             {
@@ -188,14 +203,29 @@ VALUES (
                 "id": "bedrooms",
                 "name": "Bedrooms",
                 "type": "checkbox-group",
-                "options": [],
+                "options": [
+                    { "value": 0, "label": "Studio" },
+                    { "value": 1, "label": "1" },
+                    { "value": 2, "label": "2" },
+                    { "value": 3, "label": "3" },
+                    { "value": 4, "label": "4" },
+                    { "value": 5, "label": "5" },
+                    { "value": "6+", "label": "6+" }
+                ],
                 "order": 6
             },
             {
                 "id": "bathrooms",
                 "name": "Baths",
                 "type": "checkbox-group",
-                "options": [],
+                "options": [
+                    { "value": 1, "label": "1" },
+                    { "value": 2, "label": "2" },
+                    { "value": 3, "label": "3" },
+                    { "value": 4, "label": "4" },
+                    { "value": 5, "label": "5" },
+                    { "value": "6+", "label": "6+" }
+                ],
                 "order": 7
             },
             {

@@ -43,3 +43,37 @@ export async function getFilterConfigByPurpose(options: {
   );
   return res.rows[0] ?? null;
 }
+
+/**
+ * Get all active search filter configs (for scheduler to refresh options into JSONB).
+ */
+export async function getAllActiveFilterConfigs(): Promise<
+  SearchFilterConfigRow[]
+> {
+  const res = await query<SearchFilterConfigRow>(
+    `
+    SELECT config_id, purpose_key, country_id, currency_id, language_code, version, config_json
+    FROM master.SEARCH_FILTER_CONFIGS
+    WHERE is_active = TRUE
+    ORDER BY purpose_key, config_id
+    `
+  );
+  return res.rows;
+}
+
+/**
+ * Update a filter config's config_json (e.g. after scheduler merges options).
+ */
+export async function updateFilterConfigJson(
+  configId: number,
+  configJson: Record<string, unknown>
+): Promise<void> {
+  await query(
+    `
+    UPDATE master.SEARCH_FILTER_CONFIGS
+    SET config_json = $1::jsonb, updated_at = NOW() AT TIME ZONE 'UTC'
+    WHERE config_id = $2
+    `,
+    [JSON.stringify(configJson), configId]
+  );
+}
