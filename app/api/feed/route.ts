@@ -317,8 +317,7 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // No total: pagination uses only page + limit
-    return createPaginatedResponse(items, page, perPage);
+    return createPaginatedResponse(items, page, perPage, resp.found);
   } catch (error) {
     return createErrorResponse(error);
   }
