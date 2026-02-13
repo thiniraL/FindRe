@@ -9,7 +9,6 @@ import {
 import { propertyViewSchema, validateBody } from '@/lib/security/validation';
 import {
   bumpSessionActivityAndViews,
-  countSessionViews,
   upsertPropertyView,
 } from '@/lib/db/queries/propertyViews';
 import { analyzePreferences } from '@/lib/db/queries/preferences';
@@ -79,17 +78,12 @@ export async function POST(request: NextRequest) {
 
     await bumpSessionActivityAndViews(sessionId);
 
-    // Trigger analysis after N views (N=5 in SQL function), or on-demand.
+    // Analysis at 5, 10, 15, … views is done by DB trigger (trg_analyze_preferences_on_property_view).
+    // Only call from app when client requests on-demand.
     let analyzed = false;
     if (body.analyzeNow) {
       await analyzePreferences(sessionId);
       analyzed = true;
-    } else {
-      const count = await countSessionViews(sessionId);
-      if (count === 5) {
-        await analyzePreferences(sessionId);
-        analyzed = true;
-      }
     }
 
     return createSuccessResponse({

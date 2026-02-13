@@ -73,16 +73,19 @@ export function createPaginatedResponse<T>(
   data: T[],
   page: number,
   limit: number,
-  total: number
+  total?: number | null
 ): NextResponse {
+  const pagination: { page: number; limit: number; total?: number; totalPages?: number } = {
+    page,
+    limit,
+  };
+  if (total != null && total >= 0) {
+    pagination.total = total;
+    pagination.totalPages = Math.ceil(total / limit);
+  }
   return NextResponse.json({
     data,
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-    },
+    pagination,
   });
 }
 

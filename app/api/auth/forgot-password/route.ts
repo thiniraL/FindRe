@@ -5,8 +5,6 @@ import { sendPasswordResetEmail } from '@/lib/email/send';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { forgotPasswordSchema } from '@/lib/security/validation';
-import { withRateLimit, rateLimits } from '@/lib/security/rate-limit';
-
 async function handler(request: NextRequest) {
   try {
     const body = await validateBody(request, forgotPasswordSchema);
@@ -46,7 +44,7 @@ async function handler(request: NextRequest) {
   }
 }
 
-export const POST = withRateLimit(rateLimits.passwordReset)(handler);
+export const POST = handler;
 
 
 

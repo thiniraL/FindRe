@@ -3,8 +3,6 @@ import { revokeRefreshToken } from '@/lib/db/queries/tokens';
 import { createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { refreshTokenSchema } from '@/lib/security/validation';
-import { withRateLimit, rateLimits } from '@/lib/security/rate-limit';
-
 async function handler(request: NextRequest) {
   try {
     const body = await validateBody(request, refreshTokenSchema);
@@ -19,7 +17,7 @@ async function handler(request: NextRequest) {
   }
 }
 
-export const POST = withRateLimit(rateLimits.auth)(handler);
+export const POST = handler;
 
 
 

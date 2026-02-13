@@ -3,8 +3,6 @@ import { verifyUserEmail } from '@/lib/db/queries/users';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { emailVerificationSchema } from '@/lib/security/validation';
-import { withRateLimit, rateLimits } from '@/lib/security/rate-limit';
-
 async function handler(request: NextRequest) {
   try {
     const body = await validateBody(request, emailVerificationSchema);
@@ -24,7 +22,7 @@ async function handler(request: NextRequest) {
   }
 }
 
-export const POST = withRateLimit(rateLimits.auth)(handler);
+export const POST = handler;
 
 
 

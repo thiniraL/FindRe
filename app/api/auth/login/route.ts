@@ -7,7 +7,6 @@ import { updateLastLogin } from '@/lib/db/queries/users';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { loginSchema } from '@/lib/security/validation';
-import { withRateLimit, rateLimits } from '@/lib/security/rate-limit';
 import { getUserRole } from '@/lib/authz/permissions';
 import { AppError } from '@/lib/utils/errors';
 import { linkSessionToUser, createOrUpdateUserSession } from '@/lib/db/queries/sessions';
@@ -129,5 +128,5 @@ async function handler(request: NextRequest) {
   }
 }
 
-export const POST = withRateLimit(rateLimits.login)(handler);
+export const POST = handler;
 

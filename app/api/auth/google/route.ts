@@ -9,7 +9,6 @@ import { getUserByEmail, createUser, updateUser, updateLastLogin } from '@/lib/d
 import { getUserRole } from '@/lib/authz/permissions';
 import { linkSessionToUser, createOrUpdateUserSession } from '@/lib/db/queries/sessions';
 import { getUserIdentityByProvider, upsertUserIdentity } from '@/lib/db/queries/identities';
-import { withRateLimit, rateLimits } from '@/lib/security/rate-limit';
 import * as crypto from 'crypto';
 import { User } from '@/lib/types/auth';
 
@@ -156,5 +155,5 @@ async function handler(request: NextRequest) {
   }
 }
 
-export const POST = withRateLimit(rateLimits.login)(handler);
+export const POST = handler;
 

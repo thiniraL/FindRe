@@ -7,7 +7,6 @@ import { sendVerificationEmail } from '@/lib/email/send';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { registerSchema } from '@/lib/security/validation';
-import { withRateLimit, rateLimits } from '@/lib/security/rate-limit';
 import { getUserRole } from '@/lib/authz/permissions';
 import { createOrUpdateUserSession, linkSessionToUser } from '@/lib/db/queries/sessions';
 import * as crypto from 'crypto';
@@ -124,5 +123,5 @@ async function handler(request: NextRequest) {
   }
 }
 
-export const POST = withRateLimit(rateLimits.register)(handler);
+export const POST = handler;
 

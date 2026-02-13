@@ -141,7 +141,6 @@ Endpoint: `GET /api/search` with query params (e.g. `q`, `purpose`, `location`, 
 - Password hashing: Argon2id
 - JWT signing: HS256 (symmetric)
 - Refresh token rotation on refresh
-- Rate limiting on all endpoints
 - Input validation with Zod
 - SQL injection prevention (parameterized queries)
 - Session tracking for security monitoring

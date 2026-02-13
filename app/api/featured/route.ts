@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
       q: '*',
       queryBy: PROPERTIES_QUERY_BY,
       filterBy: `is_featured:=true && country_id:=${countryId}`,
-      sortBy: 'featured_rank:asc',
+      sortBy: 'featured_rank:asc,updated_at:desc',
       page,
       perPage: limit,
     });

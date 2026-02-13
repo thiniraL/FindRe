@@ -174,8 +174,10 @@ type PreferencesForFeedRow = {
   preferred_location_ids: number[] | null;
   preferred_purpose_ids: number[] | null;
   preferred_feature_ids: number[] | null;
-   // Same JSONB tallies as in UserPreferencesRow
+  /** Same JSONB tallies as in UserPreferencesRow */
   preference_counters: PreferenceCounters | null;
+  /** Pre-computed Typesense _eval sort string; used by feed when present */
+  typesense_feed_sort_by: string | null;
   is_ready_for_recommendations: boolean;
 };
 
@@ -198,6 +200,7 @@ export async function getPreferencesForFeed(
       preferred_purpose_ids,
       preferred_feature_ids,
       preference_counters,
+      typesense_feed_sort_by,
       is_ready_for_recommendations
     FROM user_activity.USER_PREFERENCES
     WHERE session_id = $1

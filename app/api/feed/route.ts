@@ -14,8 +14,6 @@ const feedQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   countryId: z.coerce.number().int().min(1).optional(),
-  q: z.string().optional(),
-  featureKeys: z.string().optional(), // comma-separated feature keys
 });
 
 function getSessionId(request: NextRequest): string {
@@ -96,6 +94,66 @@ function bucketPrice(price: number | null | undefined): string | null {
   return '5000000+';
 }
 
+/** Typesense filter for a price bucket (same buckets as bucketPrice). */
+function priceBucketToFilter(bucket: string): string {
+  switch (bucket) {
+    case '0-1000000':
+      return 'price:[0..1000000]';
+    case '1000000-2000000':
+      return 'price:[1000000..2000000]';
+    case '2000000-5000000':
+      return 'price:[2000000..5000000]';
+    case '5000000+':
+      return 'price:>=5000000';
+    default:
+      return '';
+  }
+}
+
+/**
+ * Build Typesense sort_by using _eval (boost by preference conditions).
+ * Returns null if no clauses. Syntax: _eval([ (expr):score, ... ]):desc,updated_at:desc
+ */
+function buildSortByEval(counters: PreferenceCounters | null): string | null {
+  if (!counters) return null;
+  const clauses: string[] = [];
+
+  if (counters.bedrooms) {
+    for (const [k, score] of Object.entries(counters.bedrooms)) {
+      const s = Math.min(127, Math.max(0, Math.floor(score)));
+      if (s > 0) clauses.push(`(bedrooms:=${k}):${s}`);
+    }
+  }
+  if (counters.bathrooms) {
+    for (const [k, score] of Object.entries(counters.bathrooms)) {
+      const s = Math.min(127, Math.max(0, Math.floor(score)));
+      if (s > 0) clauses.push(`(bathrooms:=${k}):${s}`);
+    }
+  }
+  if (counters.price_buckets) {
+    for (const [bucket, score] of Object.entries(counters.price_buckets)) {
+      const s = Math.min(127, Math.max(0, Math.floor(score)));
+      const filter = priceBucketToFilter(bucket);
+      if (s > 0 && filter) clauses.push(`(${filter}):${s}`);
+    }
+  }
+  if (counters.property_types) {
+    for (const [k, score] of Object.entries(counters.property_types)) {
+      const s = Math.min(127, Math.max(0, Math.floor(score)));
+      if (s > 0) clauses.push(`(property_type_id:=${k}):${s}`);
+    }
+  }
+  if (counters.features) {
+    for (const [key, score] of Object.entries(counters.features)) {
+      const s = Math.min(127, Math.max(0, Math.floor(score)));
+      if (s > 0 && key) clauses.push(`(features:=${key}):${s}`);
+    }
+  }
+
+  if (clauses.length === 0) return null;
+  return `_eval([${clauses.join(',')}]):desc,updated_at:desc`;
+}
+
 function scorePropertyByPreferences(
   doc: TypesensePropertyDoc,
   counters: PreferenceCounters | null
@@ -132,21 +190,6 @@ function scorePropertyByPreferences(
   }
 
   return score;
-}
-
-/** Get total count of featured properties matching base filters (e.g. country_id). */
-async function getFoundCount(filterBy: string, q: string): Promise<number> {
-  const resp = await typesenseSearch<TypesensePropertyDoc>({
-    collection: 'properties',
-    q,
-    queryBy: PROPERTIES_QUERY_BY,
-    filterBy,
-    // Any stable sort is fine for "found" (we only request 1 hit)
-    sortBy: 'updated_at:desc',
-    page: 1,
-    perPage: 1,
-  });
-  return resp.found;
 }
 
 type FeedItem = {
@@ -226,140 +269,44 @@ function rerankHitsByPreferences(
     .map((x) => x.hit);
 }
 
-async function searchRestPage(params: {
-  q: string;
-  filterBy: string;
-  restOffset: number;
-  perPage: number;
-  counters: PreferenceCounters | null;
-}): Promise<Array<{ document: TypesensePropertyDoc }>> {
-  const { q, filterBy, restOffset, perPage, counters } = params;
-
-  // Fetch a window that covers the desired offset, rerank inside that window, then slice.
-  // This avoids "preferences as hard filters" while keeping pagination deterministic.
-  const windowSize = Math.min(250, Math.max(perPage * 5, perPage)); // cap to reduce load
-  const windowPage = Math.floor(restOffset / windowSize) + 1;
-  const windowStart = restOffset - (windowPage - 1) * windowSize;
-
-  const resp = await typesenseSearch<TypesensePropertyDoc>({
-    collection: 'properties',
-    q,
-    queryBy: PROPERTIES_QUERY_BY,
-    filterBy,
-    sortBy: 'updated_at:desc',
-    page: windowPage,
-    perPage: windowSize,
-  });
-
-  const reranked = rerankHitsByPreferences(resp.hits, counters);
-  return reranked.slice(windowStart, windowStart + perPage);
-}
-
 export async function GET(request: NextRequest) {
   try {
     const sessionId = getSessionId(request);
     const userId = tryGetUserIdFromAuthHeader(request);
-    const { page: pageRaw, limit: limitRaw, countryId, q, featureKeys } = validateQuery(request, feedQuerySchema);
+    const { page: pageRaw, limit: limitRaw, countryId } = validateQuery(request, feedQuerySchema);
     const page = pageRaw ?? 1;
     const perPage = limitRaw ?? 25;
     const lang = getLanguageCode(request);
 
     const prefs = await getPreferencesForFeed(sessionId);
-    const ready = Boolean(prefs?.is_ready_for_recommendations);
+    const counters =
+      prefs?.is_ready_for_recommendations && prefs
+        ? ((prefs.preference_counters ?? null) as PreferenceCounters | null)
+        : null;
 
-    // Base filters (country, optional featureKeys)
-    const baseFilters: string[] = [];
-    if (countryId) baseFilters.push(`country_id:=${countryId}`);
-    if (featureKeys) {
-      const keys = featureKeys
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      if (keys.length) {
-        baseFilters.push(`features:=[${keys.join(',')}]`);
-      }
-    }
-    const baseFilterBy = baseFilters.length ? baseFilters.join(' && ') : '';
+    const filterBy = countryId ? `country_id:=${countryId}` : undefined;
+    // Use pre-computed sort from DB when present; else build from counters; else featured then updated_at.
+    const sortByEval =
+      prefs?.is_ready_for_recommendations && prefs.typesense_feed_sort_by
+        ? prefs.typesense_feed_sort_by
+        : buildSortByEval(counters);
+    const sortBy = sortByEval ?? 'is_featured:desc,featured_rank:asc,updated_at:desc';
 
-    const searchQ = q && q.trim() ? q.trim() : '*';
+    const resp = await typesenseSearch<TypesensePropertyDoc>({
+      collection: 'properties',
+      q: '*',
+      queryBy: PROPERTIES_QUERY_BY,
+      filterBy,
+      sortBy,
+      page,
+      perPage,
+    });
 
-    // 1) Featured count (MUST use same q as the page fetch, otherwise pagination can drift)
-    const featuredFilterBy = baseFilterBy ? `${baseFilterBy} && is_featured:=true` : 'is_featured:=true';
-    const totalFeatured = await getFoundCount(featuredFilterBy, searchQ);
-
-    // 2) Rest filters: always include non-featured. Preferences should rerank, not hard-filter.
-    const restFilters: string[] = [...baseFilters, 'is_featured:=false'];
-    const restFilterBy = restFilters.join(' && ');
-
-    // Rest count (same q + same filterBy)
-    const totalRest = await getFoundCount(restFilterBy, searchQ);
-    const total = totalFeatured + totalRest;
-
-    const offset = (page - 1) * perPage;
-
-    // 3) Pagination: Case A (featured only), Case B (rest only), Case C (transition)
-    let items: FeedItem[];
-
-    if (offset + perPage <= totalFeatured) {
-      // Case A: full page of featured
-      const featuredPage = Math.floor(offset / perPage) + 1;
-      const resp = await typesenseSearch<TypesensePropertyDoc>({
-        collection: 'properties',
-        q: searchQ,
-        queryBy: PROPERTIES_QUERY_BY,
-        filterBy: featuredFilterBy,
-        sortBy: 'featured_rank:asc',
-        page: featuredPage,
-        perPage,
-      });
-      items = resp.hits.map((h) => docToFeedItem(h.document, lang, true));
-    } else if (offset >= totalFeatured) {
-      // Case B: full page of rest
-      const restOffset = offset - totalFeatured;
-      const counters =
-        ready && prefs ? ((prefs.preference_counters ?? null) as PreferenceCounters | null) : null;
-      const hits = await searchRestPage({
-        q: searchQ,
-        filterBy: restFilterBy,
-        restOffset,
-        perPage,
-        counters,
-      });
-      items = hits.map((h) => docToFeedItem(h.document, lang, false));
-    } else {
-      // Case C: transition (featured slice + rest slice)
-      const featuredCount = Math.min(perPage, totalFeatured - offset);
-      const restCount = perPage - featuredCount;
-
-      const featuredPage = Math.floor(offset / perPage) + 1;
-      const featuredResp = await typesenseSearch<TypesensePropertyDoc>({
-        collection: 'properties',
-        q: searchQ,
-        queryBy: PROPERTIES_QUERY_BY,
-        filterBy: featuredFilterBy,
-        sortBy: 'featured_rank:asc',
-        page: featuredPage,
-        perPage,
-      });
-      const sliceStart = offset - (featuredPage - 1) * perPage;
-      const featuredSlice = featuredResp.hits.slice(sliceStart, sliceStart + featuredCount);
-      let restHits: Array<{ document: TypesensePropertyDoc }> = [];
-      if (restCount > 0) {
-        const counters =
-          ready && prefs ? ((prefs.preference_counters ?? null) as PreferenceCounters | null) : null;
-        restHits = await searchRestPage({
-          q: searchQ,
-          filterBy: restFilterBy,
-          restOffset: 0,
-          perPage: restCount,
-          counters,
-        });
-      }
-      items = [
-        ...featuredSlice.map((h) => docToFeedItem(h.document, lang, true)),
-        ...restHits.map((h) => docToFeedItem(h.document, lang, false)),
-      ];
-    }
+    // When we used _eval, Typesense already ranked by preferences; no app rerank. Otherwise keep order.
+    const hits = sortByEval ? resp.hits : rerankHitsByPreferences(resp.hits, counters);
+    const items: FeedItem[] = hits.map((h) =>
+      docToFeedItem(h.document, lang, h.document.is_featured ?? false)
+    );
 
     const propertyIds = items.map((i) => i.property.id);
     const viewStatusMap = await getPropertyViewStatus(propertyIds, sessionId, userId);
@@ -370,7 +317,8 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    return createPaginatedResponse(items, page, perPage, total);
+    // No total: pagination uses only page + limit
+    return createPaginatedResponse(items, page, perPage);
   } catch (error) {
     return createErrorResponse(error);
   }

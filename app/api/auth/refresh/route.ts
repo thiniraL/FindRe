@@ -5,7 +5,6 @@ import { generateTokens } from '@/lib/auth/jwt';
 import { createErrorResponse, createSuccessResponse, AppError } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { refreshTokenSchema } from '@/lib/security/validation';
-import { withRateLimit, rateLimits } from '@/lib/security/rate-limit';
 import { getUserRole } from '@/lib/authz/permissions';
 
 const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
@@ -88,5 +87,5 @@ async function handler(request: NextRequest) {
   }
 }
 
-export const POST = withRateLimit(rateLimits.auth)(handler);
+export const POST = handler;
 
