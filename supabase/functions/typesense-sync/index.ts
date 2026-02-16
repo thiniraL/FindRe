@@ -149,35 +149,43 @@ async function ensureSyncTable(pool: Pool): Promise<void> {
     await client.queryArray(`
       CREATE TABLE IF NOT EXISTS property.TYPESENSE_SYNC_STATE (
         id TEXT PRIMARY KEY,
-        last_synced_at BIGINT NOT NULL
+        last_synced_at BIGINT NOT NULL,
+        last_property_id BIGINT NOT NULL DEFAULT 0
       );
+    `);
+    await client.queryArray(`
+      ALTER TABLE property.TYPESENSE_SYNC_STATE
+      ADD COLUMN IF NOT EXISTS last_property_id BIGINT NOT NULL DEFAULT 0;
     `);
   } finally {
     client.release();
   }
 }
 
-async function getLastSyncedAt(pool: Pool): Promise<number> {
+async function getLastSyncCursor(pool: Pool): Promise<{ cursorTime: number; cursorId: number }> {
   const client = await pool.connect();
   try {
-    const res = await client.queryObject<{ last_synced_at: string }>(
-      `SELECT last_synced_at FROM property.TYPESENSE_SYNC_STATE WHERE id = 'properties'`
+    const res = await client.queryObject<{ last_synced_at: string; last_property_id: string }>(
+      `SELECT last_synced_at, COALESCE(last_property_id, 0) AS last_property_id FROM property.TYPESENSE_SYNC_STATE WHERE id = 'properties'`
     );
-    if (!res.rows.length) return 0;
-    return Number(res.rows[0].last_synced_at);
+    if (!res.rows.length) return { cursorTime: 0, cursorId: 0 };
+    return {
+      cursorTime: Number(res.rows[0].last_synced_at),
+      cursorId: Number(res.rows[0].last_property_id),
+    };
   } finally {
     client.release();
   }
 }
 
-async function setLastSyncedAt(pool: Pool, epochSeconds: number): Promise<void> {
+async function setLastSyncCursor(pool: Pool, epochSeconds: number, propertyId: number): Promise<void> {
   const client = await pool.connect();
   try {
     await client.queryArray(
-      `INSERT INTO property.TYPESENSE_SYNC_STATE (id, last_synced_at) 
-       VALUES ('properties', $1) 
-       ON CONFLICT (id) DO UPDATE SET last_synced_at = EXCLUDED.last_synced_at`,
-      [epochSeconds]
+      `INSERT INTO property.TYPESENSE_SYNC_STATE (id, last_synced_at, last_property_id) 
+       VALUES ('properties', $1, $2) 
+       ON CONFLICT (id) DO UPDATE SET last_synced_at = EXCLUDED.last_synced_at, last_property_id = EXCLUDED.last_property_id`,
+      [epochSeconds, propertyId]
     );
   } finally {
     client.release();
@@ -281,14 +289,16 @@ serve(async (req) => {
 
     // Initializations
     await ensureSyncTable(pool);
-    const lastSyncedAt = force ? 0 : await getLastSyncedAt(pool);
+    const { cursorTime: initialCursorTime, cursorId: initialCursorId } = force
+      ? { cursorTime: 0, cursorId: 0 }
+      : await getLastSyncCursor(pool);
 
     // Batch settings
     const batchSize = 200;
-    let cursorTime = lastSyncedAt;
-    let cursorId = 0; // Tie-breaker
+    let cursorTime = initialCursorTime;
+    let cursorId = initialCursorId;
     let totalUpserted = 0;
-    let maxSeenTime = lastSyncedAt;
+    let maxSeenTime = initialCursorTime;
 
     // Ensure properties collection exists before first import
     await ensureCollection(PROPERTIES_COLLECTION_SCHEMA);
@@ -509,22 +519,27 @@ serve(async (req) => {
         cursorId = Number(lastDoc.property_id);
 
         if (cursorTime > maxSeenTime) maxSeenTime = cursorTime;
+
+        // Persist cursor after each batch so next run can resume after timeout
+        await setLastSyncCursor(pool, cursorTime, cursorId);
       } finally {
         client.release();
       }
     }
 
-    await pool.end();
-
-    if (maxSeenTime > lastSyncedAt) {
-      await setLastSyncedAt(pool, maxSeenTime);
+    // Save final state before closing pool (so it's persisted when run completes)
+    if (maxSeenTime > initialCursorTime || cursorId !== initialCursorId) {
+      await setLastSyncCursor(pool, maxSeenTime, cursorId);
     }
+    await pool.end();
 
     return new Response(
       JSON.stringify({
         ok: true,
-        lastSyncedAt,
+        lastCursorTime: initialCursorTime,
+        lastCursorId: initialCursorId,
         newLastSyncedAt: maxSeenTime,
+        newLastPropertyId: cursorId,
         upserted: totalUpserted,
       }),
       { headers: { 'Content-Type': 'application/json' } }

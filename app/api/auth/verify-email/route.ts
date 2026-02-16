@@ -13,7 +13,7 @@ async function handler(request: NextRequest) {
     const cacheKey = `email_verify:${normalizedEmail}`;
 
     const cachedOtp = emailVerificationOtpCache.get<string>(cacheKey);
-    if (!cachedOtp || cachedOtp !== body.code) {
+    if (!cachedOtp || cachedOtp !== body.otp) {
       throw new AppError('Invalid or expired verification code', 400, 'INVALID_VERIFICATION_CODE');
     }
 
