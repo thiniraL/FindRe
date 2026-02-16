@@ -16,6 +16,19 @@ export function buildVerificationEmail(verifyUrl: string): EmailContent {
   };
 }
 
+/** 6-digit OTP only (no link) */
+export function buildVerificationEmailWithOtp(otp: string): EmailContent {
+  return {
+    subject: 'Verify your email',
+    text: `Your verification code is: ${otp}\n\nThis code expires in 10 minutes.\n\nIf you did not create an account, you can ignore this email.`,
+    html: `
+      <p>Your verification code is: <strong>${otp}</strong></p>
+      <p>This code expires in 10 minutes.</p>
+      <p>If you did not create an account, you can ignore this email.</p>
+    `.trim(),
+  };
+}
+
 export function buildPasswordResetEmail(resetUrl: string): EmailContent {
   return {
     subject: 'Reset your password',

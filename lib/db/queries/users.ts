@@ -1,6 +1,7 @@
 import { query } from '@/lib/db/client';
 import { User, UserWithPassword } from '@/lib/types/auth';
 import { hashPassword, generateToken } from '@/lib/auth/password';
+import { AppError } from '@/lib/utils/errors';
 
 const USER_COLUMNS =
   'id, email, email_verified, two_factor_enabled, last_login, is_active, preferred_language_code, created_at, updated_at';
@@ -29,7 +30,7 @@ export async function createUser(
   } catch (error: unknown) {
     const pgError = error as { code?: string; message?: string };
     if (pgError?.code === '23505') {
-      throw new Error('Email already exists');
+      throw new AppError('Email already exists', 409, 'EMAIL_ALREADY_EXISTS');
     }
     throw new Error(`Failed to create user: ${pgError?.message || 'Unknown error'}`);
   }
@@ -59,7 +60,7 @@ export async function createUserWithVerificationToken(
   } catch (error: unknown) {
     const pgError = error as { code?: string; message?: string };
     if (pgError?.code === '23505') {
-      throw new Error('Email already exists');
+      throw new AppError('Email already exists', 409, 'EMAIL_ALREADY_EXISTS');
     }
     throw new Error(`Failed to create user: ${pgError?.message || 'Unknown error'}`);
   }
@@ -211,7 +212,7 @@ export async function resetPassword(
   );
 
   if (!result.rows[0]) {
-    throw new Error('Invalid or expired reset token');
+    throw new AppError('Invalid or expired reset token', 400, 'INVALID_RESET_TOKEN');
   }
 
   return result.rows[0];

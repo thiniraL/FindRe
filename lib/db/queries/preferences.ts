@@ -1,4 +1,5 @@
 import { query } from '@/lib/db/client';
+import { feedPrefsCache } from '@/lib/cache';
 
 export type OnboardingPreferencesUpsertInput = {
   preferredBedroomsMin?: number;
@@ -124,6 +125,7 @@ export async function upsertOnboardingPreferences(options: {
 
 export async function analyzePreferences(sessionId: string): Promise<void> {
   await query(`SELECT analyze_user_preferences($1)`, [sessionId]);
+  feedPrefsCache.delete(`feed_prefs:${sessionId}`);
 }
 
 type PreferencesSummaryRow = {

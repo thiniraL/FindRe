@@ -1,11 +1,12 @@
 import * as argon2 from 'argon2';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomInt } from 'crypto';
 
+// Balanced: strong security, faster login/register (~200–500ms verify vs 1–3s with 64MB/3)
 const ARGON2_OPTIONS = {
   type: argon2.argon2id,
-  memoryCost: 65536, // 64 MB
-  timeCost: 3, // 3 iterations
-  parallelism: 4, // 4 threads
+  memoryCost: 19456, // ~19 MiB (OWASP/argon2 default ballpark)
+  timeCost: 2,
+  parallelism: 4,
 } satisfies argon2.Options;
 
 /**
@@ -34,6 +35,13 @@ export async function verifyPassword(
  */
 export function generateToken(): string {
   return randomBytes(32).toString('hex');
+}
+
+/**
+ * Generate a 6-digit OTP for email verification
+ */
+export function generateVerificationOtp(): string {
+  return String(randomInt(100000, 1000000));
 }
 
 

@@ -31,7 +31,8 @@ export const refreshTokenSchema = z.object({
 });
 
 export const emailVerificationSchema = z.object({
-  token: z.string().min(1, 'Verification token is required'),
+  email: z.string().email('Invalid email address'),
+  code: z.string().length(6, 'Verification code must be 6 digits').regex(/^\d{6}$/, 'Verification code must be 6 digits'),
 });
 
 export const forgotPasswordSchema = z.object({

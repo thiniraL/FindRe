@@ -1,6 +1,6 @@
 import { Permission } from '@/lib/types/auth';
 import { getUserPermissions } from '@/lib/authz/permissions';
-import { permissionCache } from '@/lib/authz/cache';
+import { permissionCache, roleNameCache } from '@/lib/authz/cache';
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
@@ -28,18 +28,19 @@ export async function getCachedUserPermissions(
 }
 
 /**
- * Invalidate user permissions cache
+ * Invalidate user permissions and role name cache (e.g. when role/permissions change)
  */
 export function invalidateUserPermissionsCache(userId: string): void {
-  const cacheKey = `user:${userId}:permissions`;
-  permissionCache.delete(cacheKey);
+  permissionCache.delete(`user:${userId}:permissions`);
+  roleNameCache.delete(`user:${userId}:rolename`);
 }
 
 /**
- * Invalidate all permission caches (use when roles/permissions change)
+ * Invalidate all permission and role caches (use when roles/permissions change)
  */
 export function invalidateAllPermissionCaches(): void {
   permissionCache.clear();
+  roleNameCache.clear();
 }
 
 

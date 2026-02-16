@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { AppError, createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors';
 import { validateQuery } from '@/lib/security/validation';
 import { getPreferencesForFeed } from '@/lib/db/queries/preferences';
+import { feedPrefsCache } from '@/lib/cache';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
 import { typesenseSearch } from '@/lib/search/typesense';
 import { verifyAccessToken } from '@/lib/auth/jwt';
@@ -278,7 +279,12 @@ export async function GET(request: NextRequest) {
     const perPage = limitRaw ?? 25;
     const lang = getLanguageCode(request);
 
-    const prefs = await getPreferencesForFeed(sessionId);
+    const feedPrefsKey = `feed_prefs:${sessionId}`;
+    let prefs = feedPrefsCache.get<Awaited<ReturnType<typeof getPreferencesForFeed>>>(feedPrefsKey);
+    if (!prefs) {
+      prefs = await getPreferencesForFeed(sessionId);
+      if (prefs) feedPrefsCache.set(feedPrefsKey, prefs);
+    }
     const counters =
       prefs?.is_ready_for_recommendations && prefs
         ? ((prefs.preference_counters ?? null) as PreferenceCounters | null)

@@ -1,5 +1,5 @@
 import { getFromEmail, getSmtpTransporter } from './smtp';
-import { buildPasswordResetEmail, buildVerificationEmail } from './templates';
+import { buildPasswordResetEmail, buildVerificationEmail, buildVerificationEmailWithOtp } from './templates';
 
 function getFrontendBaseUrl(): URL {
   const raw = process.env.FRONTEND_URL;
@@ -36,6 +36,12 @@ async function sendEmail(to: string, subject: string, text: string, html: string
 export async function sendVerificationEmail(to: string, token: string): Promise<void> {
   const verifyUrl = buildFrontendLink('/verify-email', token);
   const { subject, text, html } = buildVerificationEmail(verifyUrl);
+  await sendEmail(to, subject, text, html);
+}
+
+/** Send verification email with 6-digit OTP only (no link) */
+export async function sendVerificationEmailWithOtp(to: string, otp: string): Promise<void> {
+  const { subject, text, html } = buildVerificationEmailWithOtp(otp);
   await sendEmail(to, subject, text, html);
 }
 

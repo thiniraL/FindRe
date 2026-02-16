@@ -10,6 +10,7 @@ import {
   validateBody,
 } from '@/lib/security/validation';
 import { upsertOnboardingPreferences } from '@/lib/db/queries/preferences';
+import { feedPrefsCache } from '@/lib/cache';
 
 function getSessionId(request: NextRequest): string {
   const sessionId = request.headers.get('x-session-id');
@@ -48,6 +49,8 @@ export async function POST(request: NextRequest) {
       userId: session.user_id,
       input: body,
     });
+
+    feedPrefsCache.delete(`feed_prefs:${sessionId}`);
 
     return createSuccessResponse({
       sessionId: prefs.session_id,

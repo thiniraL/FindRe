@@ -1,5 +1,17 @@
 import { query } from '@/lib/db/client';
 import { Permission, Role } from '@/lib/types/auth';
+import { permissionCache } from '@/lib/authz/cache';
+
+const PERMISSION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getPermissionsForCheck(userId: string): Promise<Permission[]> {
+  const key = `user:${userId}:permissions`;
+  const cached = permissionCache.get<Permission[]>(key);
+  if (cached) return cached;
+  const permissions = await getUserPermissions(userId);
+  permissionCache.set(key, permissions, PERMISSION_CACHE_TTL);
+  return permissions;
+}
 
 export async function getUserRole(userId: string): Promise<Role | null> {
   const result = await query<Role>(
@@ -54,7 +66,7 @@ export async function hasPermission(
   resource: string,
   action: string
 ): Promise<boolean> {
-  const permissions = await getUserPermissions(userId);
+  const permissions = await getPermissionsForCheck(userId);
   return permissions.some((perm) => perm.resource === resource && perm.action === action);
 }
 
@@ -62,7 +74,7 @@ export async function hasAnyPermission(
   userId: string,
   permissions: Array<{ resource: string; action: string }>
 ): Promise<boolean> {
-  const userPermissions = await getUserPermissions(userId);
+  const userPermissions = await getPermissionsForCheck(userId);
   return permissions.some((perm) =>
     userPermissions.some(
       (userPerm) => userPerm.resource === perm.resource && userPerm.action === perm.action
@@ -74,7 +86,7 @@ export async function hasAllPermissions(
   userId: string,
   permissions: Array<{ resource: string; action: string }>
 ): Promise<boolean> {
-  const userPermissions = await getUserPermissions(userId);
+  const userPermissions = await getPermissionsForCheck(userId);
   return permissions.every((perm) =>
     userPermissions.some(
       (userPerm) => userPerm.resource === perm.resource && userPerm.action === perm.action

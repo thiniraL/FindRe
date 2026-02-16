@@ -8,6 +8,7 @@ import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { loginSchema } from '@/lib/security/validation';
 import { getUserRole } from '@/lib/authz/permissions';
+import { roleNameCache } from '@/lib/authz/cache';
 import { AppError } from '@/lib/utils/errors';
 import { linkSessionToUser, createOrUpdateUserSession } from '@/lib/db/queries/sessions';
 import * as crypto from 'crypto';
@@ -60,9 +61,14 @@ async function handler(request: NextRequest) {
       throw new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS');
     }
 
-    // Get user role
-    const role = await getUserRole(user.id);
-    const roleName = role?.name || 'buyer';
+    // Get user role (cached to avoid DB on repeat logins)
+    const roleNameKey = `user:${user.id}:rolename`;
+    let roleName = roleNameCache.get<string>(roleNameKey);
+    if (roleName == null) {
+      const role = await getUserRole(user.id);
+      roleName = role?.name || 'buyer';
+      roleNameCache.set(roleNameKey, roleName);
+    }
 
     // Generate tokens
     const tokens = generateTokens(user.id, user.email, roleName);
@@ -70,45 +76,42 @@ async function handler(request: NextRequest) {
     // Revoke all existing refresh tokens (optional: for security)
     // await revokeAllUserRefreshTokens(user.id);
 
-    // Store refresh token
     const ipAddress = request.headers.get('x-forwarded-for')?.split(',')[0] ||
                      request.headers.get('x-real-ip') ||
                      'unknown';
     const userAgent = request.headers.get('user-agent') || undefined;
 
-    await createRefreshToken(
-      user.id,
-      tokens.refreshToken,
-      getRefreshExpiry(),
-      body.deviceId,
-      ipAddress,
-      userAgent
-    );
+    const sessionPromise = body.sessionId
+      ? linkSessionToUser(
+          body.sessionId,
+          user.id,
+          user.preferred_language_code || undefined
+        )
+      : (() => {
+          const sessionId = crypto.randomUUID();
+          const acceptLanguage = request.headers.get('accept-language') || 'en';
+          const detectedLanguage = acceptLanguage.split(',')[0]?.split('-')[0] || 'en';
+          return createOrUpdateUserSession(sessionId, {
+            userId: user.id,
+            ipAddress,
+            userAgent,
+            languageCode: detectedLanguage,
+            preferredLanguageCode: user.preferred_language_code || detectedLanguage,
+          });
+        })();
 
-    // Update last login
-    await updateLastLogin(user.id);
-
-    // Handle USER_SESSIONS - link session to user if sessionId provided
-    if (body.sessionId) {
-      await linkSessionToUser(
-        body.sessionId,
+    await Promise.all([
+      createRefreshToken(
         user.id,
-        user.preferred_language_code || undefined
-      );
-    } else {
-      // Create new session for authenticated user
-      const sessionId = crypto.randomUUID();
-      const acceptLanguage = request.headers.get('accept-language') || 'en';
-      const detectedLanguage = acceptLanguage.split(',')[0]?.split('-')[0] || 'en';
-      
-      await createOrUpdateUserSession(sessionId, {
-        userId: user.id,
+        tokens.refreshToken,
+        getRefreshExpiry(),
+        body.deviceId,
         ipAddress,
-        userAgent,
-        languageCode: detectedLanguage,
-        preferredLanguageCode: user.preferred_language_code || detectedLanguage,
-      });
-    }
+        userAgent
+      ),
+      updateLastLogin(user.id),
+      sessionPromise,
+    ]);
 
     return createSuccessResponse({
       user: {

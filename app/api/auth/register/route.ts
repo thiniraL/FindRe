@@ -1,14 +1,16 @@
 import { NextRequest } from 'next/server';
-import { createUserWithVerificationToken } from '@/lib/db/queries/users';
+import { createUserWithVerificationToken, getUserByEmail } from '@/lib/db/queries/users';
 import { generateTokens } from '@/lib/auth/jwt';
 import { createRefreshToken } from '@/lib/db/queries/tokens';
 import { assignRoleToUser, getRoleByName } from '@/lib/db/queries/roles';
-import { sendVerificationEmail } from '@/lib/email/send';
-import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
+import { sendVerificationEmailWithOtp } from '@/lib/email/send';
+import { AppError, createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { registerSchema } from '@/lib/security/validation';
-import { getUserRole } from '@/lib/authz/permissions';
 import { createOrUpdateUserSession, linkSessionToUser } from '@/lib/db/queries/sessions';
+import { roleCache, emailVerificationOtpCache } from '@/lib/cache';
+import type { Role } from '@/lib/types/auth';
+import { generateVerificationOtp } from '@/lib/auth/password';
 import * as crypto from 'crypto';
 
 const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
@@ -53,57 +55,64 @@ async function handler(request: NextRequest) {
     // Determine preferred language
     const preferredLanguageCode = body.preferredLanguageCode || detectedLanguage || 'en';
 
+    // Fail fast if email already exists (avoid expensive password hash)
+    const existingUser = await getUserByEmail(body.email);
+    if (existingUser) {
+      return createErrorResponse(new AppError('Email already exists', 409, 'EMAIL_ALREADY_EXISTS'));
+    }
+
     // Create user with language preference
-    const { user, emailVerificationToken } = await createUserWithVerificationToken(
+    const { user } = await createUserWithVerificationToken(
       body.email,
       body.password,
       preferredLanguageCode
     );
 
-    try {
-      await sendVerificationEmail(user.email, emailVerificationToken);
-    } catch (err) {
-      // Don't fail registration if email provider is down
+    // Send 6-digit OTP only (no link) in background
+    const normalizedEmail = body.email.toLowerCase().trim();
+    const otp = generateVerificationOtp();
+    emailVerificationOtpCache.set(`email_verify:${normalizedEmail}`, otp);
+    sendVerificationEmailWithOtp(user.email, otp).catch((err) => {
       console.error('Failed to send verification email:', err);
-    }
+    });
 
-    // Assign default role (buyer)
-    const defaultRole = await getRoleByName('buyer');
+    // Assign default role (buyer) - use cache to avoid DB hit on every registration
+    let defaultRole = roleCache.get<Role>('buyer');
+    if (!defaultRole) {
+      defaultRole = await getRoleByName('buyer');
+      if (defaultRole) roleCache.set('buyer', defaultRole);
+    }
     if (defaultRole) {
       await assignRoleToUser(user.id, defaultRole.id);
     }
 
-    // Get user role
-    const role = await getUserRole(user.id);
-    const roleName = role?.name || 'buyer';
+    // We just assigned buyer; use it for tokens (skip getUserRole DB call)
+    const tokens = generateTokens(user.id, user.email, 'buyer');
 
-    // Generate tokens
-    const tokens = generateTokens(user.id, user.email, roleName);
+    const sessionPromise = body.sessionId
+      ? linkSessionToUser(body.sessionId, user.id, preferredLanguageCode)
+      : (() => {
+          const sessionId = crypto.randomUUID();
+          return createOrUpdateUserSession(sessionId, {
+            userId: user.id,
+            ipAddress,
+            userAgent,
+            languageCode: detectedLanguage,
+            preferredLanguageCode,
+          });
+        })();
 
-    // Store refresh token
-    await createRefreshToken(
-      user.id,
-      tokens.refreshToken,
-      getRefreshExpiry(),
-      body.deviceId,
-      ipAddress,
-      userAgent
-    );
-
-    // Handle USER_SESSIONS - link session to user if sessionId provided
-    if (body.sessionId) {
-      await linkSessionToUser(body.sessionId, user.id, preferredLanguageCode);
-    } else {
-      // Create new session for authenticated user
-      const sessionId = crypto.randomUUID();
-      await createOrUpdateUserSession(sessionId, {
-        userId: user.id,
+    await Promise.all([
+      createRefreshToken(
+        user.id,
+        tokens.refreshToken,
+        getRefreshExpiry(),
+        body.deviceId,
         ipAddress,
-        userAgent,
-        languageCode: detectedLanguage,
-        preferredLanguageCode,
-      });
-    }
+        userAgent
+      ),
+      sessionPromise,
+    ]);
 
     return createSuccessResponse({
       user: {

@@ -49,15 +49,17 @@ class SimpleCache {
 }
 
 const permissionCache = new SimpleCache();
+const roleNameCache = new SimpleCache();
 
 // Cleanup expired entries every 10 minutes
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     permissionCache.cleanup();
+    roleNameCache.cleanup();
   }, 10 * 60 * 1000);
 }
 
-export { permissionCache };
+export { permissionCache, roleNameCache };
 
 
 

@@ -7,6 +7,7 @@ import {
 import { validateParams } from '@/lib/security/validation';
 import { propertyIdSchema } from '@/lib/security/validation';
 import { getPropertyById } from '@/lib/db/queries/propertyDetails';
+import { propertyDetailCache } from '@/lib/cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +26,13 @@ export async function GET(
     const { id: propertyId } = validateParams(params, propertyIdSchema);
     const lang = getLanguageCode(request);
 
-    const row = await getPropertyById(propertyId, lang);
+    const cacheKey = `property:${propertyId}:${lang}`;
+    let row = propertyDetailCache.get<Awaited<ReturnType<typeof getPropertyById>>>(cacheKey);
+    if (!row) {
+      row = await getPropertyById(propertyId, lang);
+      if (row) propertyDetailCache.set(cacheKey, row);
+    }
+
     if (!row) {
       throw new AppError(
         `Property ${propertyId} not found`,

@@ -1,4 +1,5 @@
 import { query } from '@/lib/db/client';
+import { filterConfigCache } from '@/lib/cache';
 
 export type SearchFilterConfigRow = {
   config_id: number;
@@ -76,4 +77,5 @@ export async function updateFilterConfigJson(
     `,
     [JSON.stringify(configJson), configId]
   );
+  filterConfigCache.clear();
 }
