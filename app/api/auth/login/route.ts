@@ -61,6 +61,19 @@ async function handler(request: NextRequest) {
       throw new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS');
     }
 
+    // Require verified email before issuing tokens
+    if (!user.email_verified) {
+      return createSuccessResponse({
+        emailVerificationRequired: true,
+        message: 'Please verify your email to sign in.',
+        user: {
+          id: user.id,
+          email: user.email,
+          emailVerified: false,
+        },
+      });
+    }
+
     // Get user role (cached to avoid DB on repeat logins)
     const roleNameKey = `user:${user.id}:rolename`;
     let roleName = roleNameCache.get<string>(roleNameKey);
