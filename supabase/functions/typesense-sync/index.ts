@@ -145,6 +145,7 @@ async function ensureCollection(schema: TypesenseCollectionSchema): Promise<void
 async function ensureSyncTable(pool: Pool): Promise<void> {
   const client = await pool.connect();
   try {
+    await client.queryArray(`SET client_min_messages = WARNING`);
     await client.queryArray(`
       CREATE TABLE IF NOT EXISTS property.TYPESENSE_SYNC_STATE (
         id TEXT PRIMARY KEY,
@@ -250,7 +251,12 @@ async function importDocs(docs: PropertyDoc[]): Promise<void> {
     .filter((item) => item.res.success === false);
 
   if (failures.length > 0) {
-    const firstError = failures[0].res.error || 'Unknown error';
+    const first = failures[0];
+    const firstError =
+      first?.res?.error ??
+      first?.res?.message ??
+      (first?.res && typeof first.res === 'object' ? JSON.stringify(first.res) : null) ??
+      'Unknown error';
     console.error(`Typesense import had ${failures.length} failures out of ${docs.length}`);
     console.error('First failure:', JSON.stringify(failures[0]));
     throw new Error(`Typesense import failed for ${failures.length} docs. First error: ${firstError}`);
