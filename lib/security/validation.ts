@@ -147,6 +147,8 @@ export const searchQuerySchema = z.object({
     keyword: z.string().optional(),
     agentIds: z.string().optional(), // comma-separated IDs
   featureIds: z.string().optional(), // comma-separated feature IDs
+  /** Use Typesense Natural Language Search (LLM parses q into filters/sorts). */
+  nl_query: z.coerce.boolean().optional(),
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
@@ -171,6 +173,8 @@ export const searchBodySchema = z
     keyword: z.union([z.string(), z.array(z.string())]).optional(),
     agentIds: z.array(z.number().int().min(1)).optional(),
     featureIds: z.array(z.number().int().min(1)).optional(),
+    /** Use Typesense Natural Language Search (LLM parses q into filters/sorts). */
+    nl_query: z.boolean().optional(),
     page: z.number().int().min(1).optional(),
     limit: z.number().int().min(1).max(100).optional(),
   })

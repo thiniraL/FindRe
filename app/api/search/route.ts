@@ -22,12 +22,10 @@ import { verifyAccessToken } from '@/lib/auth/jwt';
 export const dynamic = 'force-dynamic';
 
 /**
- * Search pipeline (achieved):
- *   User text (q + explicit params)
- *     → NLP / Rule parser (parseNaturalLanguageQuery + mergeNaturalLanguageIntoState)
- *     → Structured query + filters (buildSearchQuery + buildFilterBy)
- *     → Typesense
- *     → Results
+ * Search pipeline:
+ *   When nl_query=true: raw q + explicit filters → Typesense with nl_query/nl_model_id (LLM parses q).
+ *   Otherwise: rule-based NL (parseNaturalLanguageQuery + mergeNaturalLanguageIntoState)
+ *     → buildSearchQuery + buildFilterBy → Typesense.
  */
 
 const DEFAULT_COUNTRY_ID = 1;
@@ -156,8 +154,9 @@ export async function GET(request: NextRequest) {
       featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
 
-    // Natural language query mapping: parse "q" and merge into filter state (explicit params override)
-    if (parsed.q?.trim()) {
+    // When nl_query=true we use Typesense NL (LLM); skip rule-based parse of q. Otherwise merge q into filter state.
+    const useTypesenseNl = parsed.nl_query === true;
+    if (!useTypesenseNl && parsed.q?.trim()) {
       const nlMapped = parseNaturalLanguageQuery(parsed.q);
       mergeNaturalLanguageIntoState(filterState, nlMapped);
     }
@@ -170,7 +169,12 @@ export async function GET(request: NextRequest) {
     const page = parsed.page ?? DEFAULT_PAGE;
     const perPage = parsed.limit ?? DEFAULT_LIMIT;
 
-    const { items, found } = await runSearch(filterState, page, perPage, request);
+    const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
+    const { items, found } = await runSearch(filterState, page, perPage, request, {
+      useNlQuery: useTypesenseNl && !!nlModelId,
+      rawQ: parsed.q?.trim() || undefined,
+      nlModelId,
+    });
     return createPaginatedResponse(items, page, perPage, found);
   } catch (error) {
     return createErrorResponse(error);
@@ -187,17 +191,25 @@ function stripStopwords(s: string | undefined): string | undefined {
   return cleaned.length > 0 ? cleaned : undefined;
 }
 
+type RunSearchNlOptions = {
+  useNlQuery: boolean;
+  rawQ?: string;
+  nlModelId?: string;
+};
+
 async function runSearch(
   filterState: SearchFilterState,
   page: number,
   perPage: number,
-  request: NextRequest
+  request: NextRequest,
+  nlOptions?: RunSearchNlOptions
 ): Promise<{ items: Array<{ property: object }>; found: number }> {
   const lang = getLanguageCode(request);
   if (filterState.location) filterState.location = stripStopwords(filterState.location);
   if (filterState.keyword) filterState.keyword = stripStopwords(filterState.keyword);
 
-  const q = buildSearchQuery(filterState);
+  const useNl = nlOptions?.useNlQuery && nlOptions?.nlModelId;
+  const q = useNl ? (nlOptions.rawQ?.trim() || '*') : buildSearchQuery(filterState);
   const filterBy = buildFilterBy(filterState);
 
   const resp = await typesenseSearch<TypesensePropertyDoc>({
@@ -208,6 +220,10 @@ async function runSearch(
     sortBy: 'updated_at:desc',
     page,
     perPage,
+    ...(useNl && {
+      nlQuery: true,
+      nlModelId: nlOptions!.nlModelId,
+    }),
   });
 
   const sessionId = getSessionId(request);
@@ -283,7 +299,8 @@ export async function POST(request: NextRequest) {
       featureIds: body.featureIds?.length ? body.featureIds : undefined,
     };
 
-    if (body.q?.trim()) {
+    const useTypesenseNl = body.nl_query === true;
+    if (!useTypesenseNl && body.q?.trim()) {
       const nlMapped = parseNaturalLanguageQuery(body.q);
       mergeNaturalLanguageIntoState(filterState, nlMapped);
     }
@@ -294,7 +311,12 @@ export async function POST(request: NextRequest) {
     const page = body.page ?? DEFAULT_PAGE;
     const perPage = body.limit ?? DEFAULT_LIMIT;
 
-    const { items, found } = await runSearch(filterState, page, perPage, request);
+    const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
+    const { items, found } = await runSearch(filterState, page, perPage, request, {
+      useNlQuery: useTypesenseNl && !!nlModelId,
+      rawQ: body.q?.trim() || undefined,
+      nlModelId,
+    });
     return createPaginatedResponse(items, page, perPage, found);
   } catch (error) {
     return createErrorResponse(error);
