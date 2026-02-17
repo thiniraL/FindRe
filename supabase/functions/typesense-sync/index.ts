@@ -304,6 +304,7 @@ serve(async (req) => {
     await ensureCollection(PROPERTIES_COLLECTION_SCHEMA);
 
     while (true) {
+      let docs: PropertyDoc[] = [];
       const client = await pool.connect();
       try {
         // Location: property.address only; LOCATIONS optional (country_id default 1 when null).
@@ -463,7 +464,7 @@ serve(async (req) => {
         const rows = result.rows;
         if (!rows.length) break;
 
-        const docs: PropertyDoc[] = rows.map((r) => {
+        docs = rows.map((r) => {
           const featuredRank =
             typeof r.featured_rank === 'number' ? r.featured_rank : 2147483647;
           const createdAt = Math.floor(new Date(r.created_at).getTime() / 1000);
@@ -509,22 +510,23 @@ serve(async (req) => {
             additional_image_urls: r.additional_image_urls,
           };
         });
-
-        await importDocs(docs);
-
-        totalUpserted += docs.length;
-
-        const lastDoc = docs[docs.length - 1];
-        cursorTime = lastDoc.updated_at;
-        cursorId = Number(lastDoc.property_id);
-
-        if (cursorTime > maxSeenTime) maxSeenTime = cursorTime;
-
-        // Persist cursor after each batch so next run can resume after timeout
-        await setLastSyncCursor(pool, cursorTime, cursorId);
       } finally {
+        // Release connection before Typesense + setLastSyncCursor (pool size 1) to avoid deadlock
         client.release();
       }
+
+      // Batch: Typesense insert then DB cursor update (no connection held)
+      await importDocs(docs);
+
+      totalUpserted += docs.length;
+
+      const lastDoc = docs[docs.length - 1];
+      cursorTime = lastDoc.updated_at;
+      cursorId = Number(lastDoc.property_id);
+
+      if (cursorTime > maxSeenTime) maxSeenTime = cursorTime;
+
+      await setLastSyncCursor(pool, cursorTime, cursorId);
     }
 
     // Save final state before closing pool (so it's persisted when run completes)

@@ -13,10 +13,70 @@ Two Edge Functions are intended to be called by **separate cron schedules**:
 
 - **Function:** `supabase/functions/typesense-sync`
 - **URL:** `https://<project-ref>.supabase.co/functions/v1/typesense-sync`
-- **Schedule:** e.g. every 15 minutes (cron or Supabase cron)
+- **Schedule:** Run every few minutes (e.g. every 5–10 min). Each run syncs up to 500 docs and updates the cursor; repeated runs will eventually sync all records.
 - **Env (Supabase Edge Function secrets):**  
-  `SUPABASE_DB_URL`, `TYPESENSE_HOST`, `TYPESENSE_PROTOCOL`, `TYPESENSE_PORT` (optional), `TYPESENSE_API_KEY`
-- **Auth:** Call with `Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>` (or Anon if you allow it).
+  `SUPABASE_DB_URL`, `TYPESENSE_HOST`, `TYPESENSE_PROTOCOL`, `TYPESENSE_PORT` (optional), `TYPESENSE_API_KEY`  
+  Optional: `TYPESENSE_SYNC_SECRET` – when set, requests must send `Authorization: Bearer <TYPESENSE_SYNC_SECRET>`.
+- **Auth:** If `TYPESENSE_SYNC_SECRET` is set, call with `Authorization: Bearer <TYPESENSE_SYNC_SECRET>`. If not set, the function allows unauthenticated calls (set the secret in production).
+
+### How to set the schedule for typesense-sync (cursor runs)
+
+Use one of the options below so the sync runs on a schedule. Each run processes up to 500 docs and updates the cursor; the next run continues from there.
+
+**Option A: External cron (Linux/macOS or server)**
+
+```bash
+# Run every 5 minutes (adjust YOUR_PROJECT_REF and auth as below)
+*/5 * * * * curl -s -X POST "https://YOUR_PROJECT_REF.supabase.co/functions/v1/typesense-sync" -H "Authorization: Bearer YOUR_TYPESENSE_SYNC_SECRET_OR_SERVICE_ROLE_KEY" -H "Content-Type: application/json"
+```
+
+- **YOUR_PROJECT_REF** = from Supabase Project URL (e.g. `abcdefgh` from `https://abcdefgh.supabase.co`).
+- Use `TYPESENSE_SYNC_SECRET` as the Bearer token if you set that secret on the function; otherwise you can use the Supabase **service_role** key.
+
+**Option B: Supabase pg_cron + pg_net (inside Postgres)**
+
+1. Enable **pg_cron** and **pg_net** (Database → Extensions).
+2. In SQL Editor run (replace URL and auth token):
+
+```sql
+SELECT cron.schedule(
+  'typesense-sync',
+  '*/5 * * * *',   -- every 5 min
+  $$
+  SELECT net.http_post(
+    url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/typesense-sync',
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer YOUR_TYPESENSE_SYNC_SECRET_OR_SERVICE_ROLE_KEY'
+    ),
+    body := '{}'
+  ) AS request_id;
+  $$
+);
+```
+
+**Option C: GitHub Actions**
+
+Add a workflow that runs on a schedule and calls the function (store the auth token as a repo secret, e.g. `TYPESENSE_SYNC_SECRET` or `SUPABASE_SERVICE_ROLE_KEY`):
+
+```yaml
+name: Typesense sync
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # every 5 min
+  workflow_dispatch:
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call typesense-sync
+        run: |
+          curl -s -X POST "${{ secrets.SUPABASE_FUNCTIONS_URL }}/functions/v1/typesense-sync" \
+            -H "Authorization: Bearer ${{ secrets.TYPESENSE_SYNC_SECRET }}" \
+            -H "Content-Type: application/json"
+```
+
+Set repo secrets: `SUPABASE_FUNCTIONS_URL` = `https://YOUR_PROJECT_REF.supabase.co`, and `TYPESENSE_SYNC_SECRET` (same value as the Edge Function secret).
 
 ---
 
@@ -111,4 +171,4 @@ Set secrets: `SUPABASE_FUNCTIONS_URL` = `https://YOUR_PROJECT_REF.supabase.co`, 
 
 ---
 
-Keep the **typesense-sync** schedule as you already have it. The filter-config-refresh schedule is independent and only calls this Edge Function.
+**typesense-sync** and **filter-config-refresh** use separate schedules; set each as above. The typesense-sync cursor will advance on every run until all records are synced.

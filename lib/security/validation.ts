@@ -166,10 +166,10 @@ export const searchBodySchema = z
     propertyTypeIds: z.array(z.number().int().min(1)).optional(),
     bedrooms: z.array(z.union([z.number().int().min(0), z.string().regex(/^\d+\+$/)])).optional(),
     bathrooms: z.array(z.union([z.number().int().min(1), z.string().regex(/^\d+\+$/)])).optional(),
-    priceMin: z.number().min(0).optional(),
-    priceMax: z.number().min(0).optional(),
-    areaMin: z.number().min(0).optional(),
-    areaMax: z.number().min(0).optional(),
+    /** Price range: [min, max], index 0 = min, index 1 = max */
+    price: z.tuple([z.number().min(0), z.number().min(0)]).optional(),
+    /** Area range (sqm): [min, max], index 0 = min, index 1 = max */
+    area: z.tuple([z.number().min(0), z.number().min(0)]).optional(),
     /** Keywords: string or array e.g. ["beach", "golf", "marina"]; joined to one search string */
     keyword: z.union([z.string(), z.array(z.string())]).optional(),
     agentIds: z.array(z.number().int().min(1)).optional(),

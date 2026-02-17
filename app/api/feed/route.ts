@@ -199,6 +199,7 @@ type FeedItem = {
     title: string | null;
     location: string | null;
     price: number | null;
+    area: number | null;
     bedrooms: number | null;
     bathrooms: number | null;
     primaryImageUrl: string | null;
@@ -226,6 +227,7 @@ function docToFeedItem(
       title: lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
       location,
       price: d.price ?? null,
+      area: d.area_sqm ?? null,
       bedrooms: d.bedrooms ?? null,
       bathrooms: d.bathrooms ?? null,
       primaryImageUrl: d.primary_image_url ?? null,
