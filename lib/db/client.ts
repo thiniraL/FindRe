@@ -9,7 +9,12 @@ function getPool(): Pool {
   }
 
   if (!pool) {
-    pool = new Pool({ connectionString: databaseUrl });
+    pool = new Pool({
+      connectionString: databaseUrl,
+      max: 1,
+      idleTimeoutMillis: 10000,
+      connectionTimeoutMillis: 10000,
+    });
   }
 
   return pool;
