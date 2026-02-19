@@ -70,6 +70,8 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'agent_whatsapp', type: 'string', optional: true },
     { name: 'primary_image_url', type: 'string', optional: true },
     { name: 'additional_image_urls', type: 'string[]', optional: true },
+    { name: 'all_image_urls', type: 'string[]', optional: true },
+    { name: 'image_is_featured', type: 'int32[]', optional: true },
     { name: 'geo', type: 'geopoint', optional: true },
   ],
 };
@@ -178,15 +180,24 @@ async function getLastSyncCursor(pool: Pool): Promise<{ cursorTime: number; curs
   }
 }
 
+/** Persist cursor using an existing client (same session = reliable commit). */
+async function setLastSyncCursorWithClient(
+  client: { queryArray: (args: unknown) => Promise<unknown> },
+  epochSeconds: number,
+  propertyId: number
+): Promise<void> {
+  await client.queryArray(
+    `INSERT INTO property.TYPESENSE_SYNC_STATE (id, last_synced_at, last_property_id) 
+     VALUES ('properties', $1, $2) 
+     ON CONFLICT (id) DO UPDATE SET last_synced_at = EXCLUDED.last_synced_at, last_property_id = EXCLUDED.last_property_id`,
+    [epochSeconds, Number(propertyId)]
+  );
+}
+
 async function setLastSyncCursor(pool: Pool, epochSeconds: number, propertyId: number): Promise<void> {
   const client = await pool.connect();
   try {
-    await client.queryArray(
-      `INSERT INTO property.TYPESENSE_SYNC_STATE (id, last_synced_at, last_property_id) 
-       VALUES ('properties', $1, $2) 
-       ON CONFLICT (id) DO UPDATE SET last_synced_at = EXCLUDED.last_synced_at, last_property_id = EXCLUDED.last_property_id`,
-      [epochSeconds, propertyId]
-    );
+    await setLastSyncCursorWithClient(client, epochSeconds, propertyId);
   } finally {
     client.release();
   }
@@ -229,6 +240,8 @@ type PropertyDoc = {
   community_en: string | null;
   primary_image_url: string | null;
   additional_image_urls: string[] | null;
+  all_image_urls: string[] | null;
+  image_is_featured: number[] | null;
 };
 
 async function importDocs(docs: PropertyDoc[]): Promise<void> {
@@ -268,6 +281,27 @@ async function importDocs(docs: PropertyDoc[]): Promise<void> {
     console.error(`Typesense import had ${failures.length} failures out of ${docs.length}`);
     console.error('First failure:', JSON.stringify(failures[0]));
     throw new Error(`Typesense import failed for ${failures.length} docs. First error: ${firstError}`);
+  }
+}
+
+/** Delete documents from Typesense by id (property_id as string). */
+async function deleteDocs(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  await ensureCollection(PROPERTIES_COLLECTION_SCHEMA);
+  const body = ids.map((id) => JSON.stringify({ id })).join('\n');
+  const res = await tsFetch(
+    `/collections/properties/documents/import?action=delete`,
+    { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body }
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Typesense delete import error (${res.status}) ${text}`);
+  }
+  const resultText = await res.text();
+  const lines = resultText.split('\n').filter(Boolean);
+  const failures = lines.filter((line) => (JSON.parse(line) as { success?: boolean }).success === false);
+  if (failures.length > 0) {
+    console.error(`Typesense delete had ${failures.length} failures`);
   }
 }
 
@@ -345,7 +379,8 @@ serve(async (req) => {
           community_en: string | null;
           primary_image_url: string | null;
           additional_image_urls: string[] | null;
-          // Deno Postgres returns BIGINT as bigint
+          all_image_urls: string[] | null;
+          image_is_featured: number[] | null;
           updated_epoch: number | bigint;
         }>(
           `
@@ -399,6 +434,8 @@ serve(async (req) => {
             img.image_url AS primary_image_url,
             feats.features,
             add_imgs.additional_image_urls,
+            all_imgs.all_image_urls,
+            all_imgs.image_is_featured,
             EXTRACT(
               EPOCH FROM GREATEST(
                 b.updated_at,
@@ -407,33 +444,51 @@ serve(async (req) => {
             )::bigint AS updated_epoch
           FROM base b
           LEFT JOIN LATERAL (
+            SELECT EXISTS(
+              SELECT 1 FROM property.PROPERTY_IMAGES pi
+              WHERE pi.property_id = b.property_id AND pi.is_featured = TRUE
+            ) AS has_featured
+          ) hf ON TRUE
+          LEFT JOIN LATERAL (
             SELECT COALESCE(pi.compressed_image_url, pi.image_url) AS image_url
             FROM property.PROPERTY_IMAGES pi
             WHERE pi.property_id = b.property_id
-            ORDER BY pi.is_primary DESC, pi.display_order ASC, pi.image_id ASC
+              AND ((hf.has_featured AND pi.is_featured = TRUE) OR (NOT hf.has_featured))
+            ORDER BY pi.display_order ASC, pi.is_primary DESC NULLS LAST, pi.image_id ASC
             LIMIT 1
           ) img ON TRUE
           LEFT JOIN LATERAL (
-            -- Derive feature keys from feature_ids for display/facet
             SELECT ARRAY(
               SELECT f.feature_key FROM unnest(COALESCE(b.feature_ids, '{}')) AS fid
               JOIN property.FEATURES f ON f.feature_id = fid
             ) AS features
           ) feats ON TRUE
           LEFT JOIN LATERAL (
-            -- Fetch up to 5 additional image URLs
             SELECT ARRAY(
               SELECT COALESCE(pi.compressed_image_url, pi.image_url)
               FROM property.PROPERTY_IMAGES pi
               WHERE pi.property_id = b.property_id
-                -- Exclude primary image if already picked (handle NULL primary)
-                AND COALESCE(pi.compressed_image_url, pi.image_url) IS DISTINCT FROM img.image_url
-              ORDER BY pi.display_order ASC, pi.image_id ASC
-              LIMIT 5
+                AND ((hf.has_featured AND pi.is_featured = TRUE) OR (NOT hf.has_featured))
+              ORDER BY pi.display_order ASC, pi.is_primary DESC NULLS LAST, pi.image_id ASC
+              OFFSET 1 LIMIT 4
             ) AS additional_image_urls
           ) add_imgs ON TRUE
           LEFT JOIN LATERAL (
-            -- Track the latest compression time across all images
+            SELECT
+              ARRAY(
+                SELECT COALESCE(pi.compressed_image_url, pi.image_url)
+                FROM property.PROPERTY_IMAGES pi
+                WHERE pi.property_id = b.property_id
+                ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC
+              ) AS all_image_urls,
+              ARRAY(
+                SELECT (CASE WHEN COALESCE(pi.is_featured, FALSE) THEN 1 ELSE 0 END)::int
+                FROM property.PROPERTY_IMAGES pi
+                WHERE pi.property_id = b.property_id
+                ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC
+              ) AS image_is_featured
+          ) all_imgs ON TRUE
+          LEFT JOIN LATERAL (
             SELECT MAX(pi.last_compressed_at) AS last_compressed_at
             FROM property.PROPERTY_IMAGES pi
             WHERE pi.property_id = b.property_id
@@ -464,69 +519,81 @@ serve(async (req) => {
         const rows = result.rows;
         if (!rows.length) break;
 
-        docs = rows.map((r) => {
-          const featuredRank =
-            typeof r.featured_rank === 'number' ? r.featured_rank : 2147483647;
-          const createdAt = Math.floor(new Date(r.created_at).getTime() / 1000);
-          const updatedAt =
-            typeof r.updated_epoch === 'bigint' ? Number(r.updated_epoch) : r.updated_epoch;
+        const isActive = (s: string | null) =>
+          s != null && String(s).trim().toLowerCase() === 'active';
+        const toDelete: string[] = [];
+        docs = rows
+          .filter((r) => {
+            if (!isActive(r.status)) {
+              toDelete.push(String(r.property_id));
+              return false;
+            }
+            return true;
+          })
+          .map((r) => {
+            const featuredRank =
+              typeof r.featured_rank === 'number' ? r.featured_rank : 2147483647;
+            const createdAt = Math.floor(new Date(r.created_at).getTime() / 1000);
+            const updatedAt =
+              typeof r.updated_epoch === 'bigint' ? Number(r.updated_epoch) : r.updated_epoch;
+            return {
+              id: String(r.property_id),
+              property_id: String(r.property_id),
+              country_id: r.country_id,
+              purpose_id: r.purpose_id,
+              purpose_key: r.purpose_key,
+              property_type_id: r.property_type_id,
+              property_type_ids: r.property_type_ids ?? null,
+              main_property_type_ids: r.main_property_type_ids ?? null,
+              price: r.price !== null ? Number(r.price) : null,
+              currency_id: r.currency_id,
+              bedrooms: r.bedrooms,
+              bathrooms: r.bathrooms,
+              area_sqft: r.area_sqft !== null ? Number(r.area_sqft) : null,
+              area_sqm: r.area_sqm !== null ? Number(r.area_sqm) : null,
+              address: r.address,
+              feature_ids: r.feature_ids ?? null,
+              features: r.features ?? null,
+              agent_id: r.agent_id,
+              agent_name: r.agent_name,
+              agent_email: r.agent_email,
+              agent_phone: r.agent_phone,
+              agent_whatsapp: r.agent_whatsapp,
+              status: r.status,
+              completion_status: r.completion_status ?? null,
+              is_off_plan: r.is_off_plan,
+              is_featured: Boolean(r.is_featured),
+              featured_rank: featuredRank,
+              created_at: createdAt,
+              updated_at: updatedAt,
+              title_en: r.title_en,
+              title_ar: r.title_ar,
+              city_en: r.city_en,
+              area_en: r.area_en,
+              community_en: r.community_en,
+              primary_image_url: r.primary_image_url,
+              additional_image_urls: r.additional_image_urls,
+              all_image_urls: r.all_image_urls ?? null,
+              image_is_featured: r.image_is_featured ?? null,
+            };
+          });
 
-          return {
-            id: String(r.property_id),
-            property_id: String(r.property_id),
-            country_id: r.country_id,
-            purpose_id: r.purpose_id,
-            purpose_key: r.purpose_key,
-            property_type_id: r.property_type_id,
-            property_type_ids: r.property_type_ids ?? null,
-            main_property_type_ids: r.main_property_type_ids ?? null,
-            price: r.price !== null ? Number(r.price) : null,
-            currency_id: r.currency_id,
-            bedrooms: r.bedrooms,
-            bathrooms: r.bathrooms,
-            area_sqft: r.area_sqft !== null ? Number(r.area_sqft) : null,
-            area_sqm: r.area_sqm !== null ? Number(r.area_sqm) : null,
-            address: r.address,
-            feature_ids: r.feature_ids ?? null,
-            features: r.features ?? null,
-            agent_id: r.agent_id,
-            agent_name: r.agent_name,
-            agent_email: r.agent_email,
-            agent_phone: r.agent_phone,
-            agent_whatsapp: r.agent_whatsapp,
-            status: r.status,
-            completion_status: r.completion_status ?? null,
-            is_off_plan: r.is_off_plan,
-            is_featured: Boolean(r.is_featured),
-            featured_rank: featuredRank,
-            created_at: createdAt,
-            updated_at: updatedAt,
-            title_en: r.title_en,
-            title_ar: r.title_ar,
-            city_en: r.city_en,
-            area_en: r.area_en,
-            community_en: r.community_en,
-            primary_image_url: r.primary_image_url,
-            additional_image_urls: r.additional_image_urls,
-          };
-        });
+        const lastRow = rows[rows.length - 1];
+        const lastEpoch =
+          typeof lastRow.updated_epoch === 'bigint'
+            ? Number(lastRow.updated_epoch)
+            : lastRow.updated_epoch;
+        cursorTime = lastEpoch;
+        cursorId = Number(lastRow.property_id);
+        if (cursorTime > maxSeenTime) maxSeenTime = cursorTime;
+        await setLastSyncCursorWithClient(client, cursorTime, cursorId);
       } finally {
-        // Release connection before Typesense + setLastSyncCursor (pool size 1) to avoid deadlock
         client.release();
       }
 
-      // Batch: Typesense insert then DB cursor update (no connection held)
       await importDocs(docs);
-
       totalUpserted += docs.length;
-
-      const lastDoc = docs[docs.length - 1];
-      cursorTime = lastDoc.updated_at;
-      cursorId = Number(lastDoc.property_id);
-
-      if (cursorTime > maxSeenTime) maxSeenTime = cursorTime;
-
-      await setLastSyncCursor(pool, cursorTime, cursorId);
+      if (toDelete.length > 0) await deleteDocs(toDelete);
     }
 
     // Save final state before closing pool (so it's persisted when run completes)

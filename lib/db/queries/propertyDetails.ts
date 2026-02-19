@@ -35,7 +35,10 @@ export type PropertyDetailRow = {
   agent_phone: string | null;
   agent_whatsapp: string | null;
   primary_image_url: string | null;
+  /** All images in display order; each has url and is_featured (featured set max 5). */
   image_urls: string[] | null;
+  /** Same order as image_urls; true when image is in the featured set. */
+  image_is_featured: boolean[] | null;
 };
 
 /**
@@ -89,13 +92,15 @@ export async function getPropertyById(
       a.whatsapp AS agent_whatsapp,
       primary_img.image_url AS primary_image_url,
       (
-        SELECT array_agg(
-          COALESCE(pi.compressed_image_url, pi.image_url)
-          ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC
-        )
+        SELECT array_agg(COALESCE(pi.compressed_image_url, pi.image_url) ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC)
         FROM property.PROPERTY_IMAGES pi
         WHERE pi.property_id = p.property_id
-      ) AS image_urls
+      ) AS image_urls,
+      (
+        SELECT array_agg(COALESCE(pi.is_featured, FALSE) ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC)
+        FROM property.PROPERTY_IMAGES pi
+        WHERE pi.property_id = p.property_id
+      ) AS image_is_featured
     FROM property.PROPERTIES p
     LEFT JOIN property.LOCATIONS l ON l.location_id = p.location_id
     LEFT JOIN master.COUNTRIES co ON co.country_id = COALESCE(l.country_id, 1)
@@ -116,4 +121,63 @@ export async function getPropertyById(
     [propertyId, lang]
   );
   return res.rows[0] ?? null;
+}
+
+export type PropertyImagesRow = {
+  property_id: number;
+  primary_image_url: string | null;
+  image_urls: string[];
+  image_is_featured: boolean[];
+};
+
+/**
+ * Get all images (and is_featured) for multiple properties. Used to enrich search results with full image lists.
+ * Returns a Map by property_id; each value has primary_image_url and ordered image_urls + image_is_featured.
+ */
+export async function getPropertyImagesBulk(
+  propertyIds: number[]
+): Promise<Map<number, PropertyImagesRow>> {
+  if (!propertyIds.length) return new Map();
+  const res = await query<{
+    property_id: number;
+    primary_image_url: string | null;
+    image_urls: string[];
+    image_is_featured: boolean[];
+  }>(
+    `
+    WITH ids AS (SELECT unnest($1::int[]) AS property_id),
+         ordered AS (
+           SELECT pi.property_id,
+                  COALESCE(pi.compressed_image_url, pi.image_url) AS url,
+                  COALESCE(pi.is_featured, FALSE) AS is_featured
+           FROM property.PROPERTY_IMAGES pi
+           JOIN ids i ON i.property_id = pi.property_id
+           ORDER BY pi.property_id, pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC
+         ),
+         agg AS (
+           SELECT property_id,
+                  (array_agg(url))[1] AS primary_image_url,
+                  array_agg(url) AS image_urls,
+                  array_agg(is_featured) AS image_is_featured
+           FROM ordered
+           GROUP BY property_id
+         )
+    SELECT a.property_id,
+           a.primary_image_url,
+           COALESCE(a.image_urls, '{}') AS image_urls,
+           COALESCE(a.image_is_featured, '{}') AS image_is_featured
+    FROM agg a
+    `,
+    [propertyIds]
+  );
+  const map = new Map<number, PropertyImagesRow>();
+  for (const row of res.rows) {
+    map.set(row.property_id, {
+      property_id: row.property_id,
+      primary_image_url: row.primary_image_url,
+      image_urls: row.image_urls ?? [],
+      image_is_featured: row.image_is_featured ?? [],
+    });
+  }
+  return map;
 }

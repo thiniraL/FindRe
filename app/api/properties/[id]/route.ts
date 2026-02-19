@@ -41,6 +41,17 @@ export async function GET(
       );
     }
 
+    const isActive =
+      row.status != null &&
+      String(row.status).trim().toLowerCase() === 'active';
+    if (!isActive) {
+      throw new AppError(
+        'Property is no longer available',
+        404,
+        'PROPERTY_NOT_ACTIVE'
+      );
+    }
+
     const region =
       row.state_province ?? row.emirate ?? row.country_name ?? null;
     const addressLine1 =
@@ -82,8 +93,8 @@ export async function GET(
       areaSqft: row.area_sqft ?? null,
       features: Array.isArray(row.features_jsonb) ? row.features_jsonb : [],
       images: {
-        primaryImageUrl: row.primary_image_url ?? null,
-        galleryUrls: Array.isArray(row.image_urls) ? row.image_urls : [],
+        primaryImageUrl: row.primary_image_url ?? (Array.isArray(row.image_urls) ? row.image_urls[0] ?? null : null),
+        additionalImageUrls: Array.isArray(row.image_urls) && row.image_urls.length > 0 ? row.image_urls.slice(1) : [],
       },
       agentBy:
         row.agent_id != null

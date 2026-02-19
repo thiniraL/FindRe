@@ -242,6 +242,7 @@ function docToFeedItem(
         : null,
       isFeatured,
       featuredRank: isFeatured ? (d.featured_rank ?? null) : null,
+      // Feed returns only featured images (primary + additional from Typesense; max 5 total)
       additionalImageUrls: d.additional_image_urls ?? [],
       purposeKey: d.purpose_key ?? null,
       isLiked: false,

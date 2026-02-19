@@ -90,6 +90,8 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     // Media
     { name: 'primary_image_url', type: 'string', optional: true },
     { name: 'additional_image_urls', type: 'string[]', optional: true },
+    { name: 'all_image_urls', type: 'string[]', optional: true },
+    { name: 'image_is_featured', type: 'int32[]', optional: true },
 
     // Optional geo
     { name: 'geo', type: 'geopoint', optional: true },

@@ -64,6 +64,8 @@ type TypesensePropertyDoc = {
   community_en?: string;
   primary_image_url?: string;
   additional_image_urls?: string[];
+  all_image_urls?: string[];
+  image_is_featured?: number[];
 };
 
 function parseOptionalIntList(value: string | undefined): number[] | undefined {
@@ -228,14 +230,16 @@ async function runSearch(
 
   const sessionId = getSessionId(request);
   const userId = tryGetUserIdFromAuthHeader(request);
+  const propertyIds = resp.hits.map((h) => Number(h.document.property_id));
 
   const items = resp.hits.map((h) => {
     const d = h.document;
+    const pid = Number(d.property_id);
     const locationParts = [d.address].filter(Boolean);
     const location = locationParts.length ? locationParts.join(', ') : null;
     return {
       property: {
-        id: Number(d.property_id),
+        id: pid,
         title:
           lang === 'ar'
             ? d.title_ar ?? d.title_en ?? null
@@ -246,24 +250,23 @@ async function runSearch(
         bedrooms: d.bedrooms ?? null,
         bathrooms: d.bathrooms ?? null,
         primaryImageUrl: d.primary_image_url ?? null,
-          agent: d.agent_id
-            ? {
-                id: d.agent_id,
-                name: d.agent_name ?? null,
-                email: d.agent_email ?? null,
-                phone: d.agent_phone ?? null,
-                whatsapp: d.agent_whatsapp ?? null,
-              }
-            : null,
+        agent: d.agent_id
+          ? {
+              id: d.agent_id,
+              name: d.agent_name ?? null,
+              email: d.agent_email ?? null,
+              phone: d.agent_phone ?? null,
+              whatsapp: d.agent_whatsapp ?? null,
+            }
+          : null,
         additionalImageUrls: d.additional_image_urls ?? [],
         purposeKey: d.purpose_key ?? null,
-          isLiked: false,
+        isLiked: false,
       },
     };
   });
 
   if (sessionId) {
-    const propertyIds = items.map((i) => i.property.id);
     const viewStatusMap = await getPropertyViewStatus(propertyIds, sessionId, userId);
     items.forEach((item) => {
       const status = viewStatusMap.get(item.property.id);
