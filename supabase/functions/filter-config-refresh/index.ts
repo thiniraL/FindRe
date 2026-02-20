@@ -289,13 +289,27 @@ type MergedOpts = {
   keywordOptions: OptionItem[];
 };
 
+/** Build nested options: main types first, then under each main type the property types whose main_property_type_ids contains that main id (inner options only label + value). */
+function buildNestedPropertyTypeOptions(
+  mainPropertyTypeOptions: OptionItem[],
+  propertyTypeOptions: OptionItemWithMain[]
+): { label: string; value: number; options: { label: string; value: number }[] }[] {
+  return mainPropertyTypeOptions.map((main) => ({
+    label: main.label,
+    value: main.value as number,
+    options: propertyTypeOptions
+      .filter((pt) => (pt.mainPropertyTypeIds ?? []).includes(main.value as number))
+      .map((pt) => ({ label: pt.label, value: pt.value as number })),
+  }));
+}
+
 function mergeOptionsIntoConfig(
   config: Record<string, unknown>,
   opts: MergedOpts,
   purposeKey: string
 ): Record<string, unknown> {
   const cfg = JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
-  const filters = (cfg.filters as Record<string, unknown>[] | undefined) ?? [];
+  const filtersIn = (cfg.filters as Record<string, unknown>[] | undefined) ?? [];
   const meta = cfg.meta as Record<string, unknown> | undefined;
   const { countResult, completionOptions, mainPropertyTypeOptions, propertyTypeOptions, priceRange, areaRange, featureOptions, agentOptions, keywordOptions } = opts;
   const totalCount = countResult.count;
@@ -307,18 +321,20 @@ function mergeOptionsIntoConfig(
         ? `${purposeLabel} – 0 properties`
         : `${purposeLabel} – ${totalCount.toLocaleString()} ${totalCount === 1 ? 'property' : 'properties'}`;
   }
-  for (const filter of filters) {
+  const nestedPropertyTypeOptions = buildNestedPropertyTypeOptions(mainPropertyTypeOptions, propertyTypeOptions);
+  const filters: Record<string, unknown>[] = [];
+  for (const filter of filtersIn) {
     const id = filter.id as string | undefined;
     if (!id) continue;
+    if (id === 'mainPropertyTypeIds') continue;
     switch (id) {
       case 'completionStatus':
         filter.options = completionOptions;
         break;
-      case 'mainPropertyTypeIds':
-        filter.options = mainPropertyTypeOptions;
-        break;
       case 'propertyTypeIds':
-        filter.options = propertyTypeOptions;
+        (filter as Record<string, unknown>).type = 'checkbox-group-property';
+        filter.options = nestedPropertyTypeOptions;
+        delete (filter as Record<string, unknown>).dependsOn;
         break;
       case 'bedrooms':
       case 'bathrooms':
@@ -351,7 +367,9 @@ function mergeOptionsIntoConfig(
       default:
         break;
     }
+    filters.push(filter);
   }
+  cfg.filters = filters;
   return cfg as Record<string, unknown>;
 }
 

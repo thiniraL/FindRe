@@ -94,6 +94,7 @@ async function handler(request: NextRequest) {
                      'unknown';
     const userAgent = request.headers.get('user-agent') || undefined;
 
+    const sessionId = body.sessionId ?? crypto.randomUUID();
     const sessionPromise = body.sessionId
       ? linkSessionToUser(
           body.sessionId,
@@ -101,7 +102,6 @@ async function handler(request: NextRequest) {
           user.preferred_language_code || undefined
         )
       : (() => {
-          const sessionId = crypto.randomUUID();
           const acceptLanguage = request.headers.get('accept-language') || 'en';
           const detectedLanguage = acceptLanguage.split(',')[0]?.split('-')[0] || 'en';
           return createOrUpdateUserSession(sessionId, {
@@ -133,6 +133,7 @@ async function handler(request: NextRequest) {
         emailVerified: user.email_verified,
         preferredLanguageCode: user.preferred_language_code,
       },
+      sessionId,
       tokens: {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
