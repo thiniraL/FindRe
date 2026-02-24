@@ -127,10 +127,9 @@ VALUES (
             {
                 "id": "agentIds",
                 "name": "Agent or Agency",
-                "type": "dropdown",
+                "type": "multi-select",
                 "placeholder": "Select an agent or agency",
                 "searchable": true,
-                "multiSelect": false,
                 "order": 11
             },
             {
@@ -260,10 +259,9 @@ VALUES (
             {
                 "id": "agentIds",
                 "name": "Agent or Agency",
-                "type": "dropdown",
+                "type": "multi-select",
                 "placeholder": "Select an agent or agency",
                 "searchable": true,
-                "multiSelect": false,
                 "order": 11
             },
             {

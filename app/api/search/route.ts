@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors';
 import { validateQuery, validateBody } from '@/lib/security/validation';
-import { searchQuerySchema, searchBodySchema } from '@/lib/security/validation';
+import { searchQuerySchema, searchBodySchema, agentIdFilterEntrySchema } from '@/lib/security/validation';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
 import { typesenseSearch } from '@/lib/search/typesense';
 import {
@@ -106,6 +106,23 @@ function normalizeKeyword(value: string | string[] | undefined): string | undefi
   return s.includes(',') ? s.split(',').map((x) => x.trim()).filter(Boolean).join(' ') : s;
 }
 
+/** Parse agentIds from GET query (JSON string). Expects [{"id": number, "type": "agent"|"agency"}, ...]. */
+function parseAgentIdsFromQuery(value: string | undefined): { id: number; type: 'agency' | 'agent' }[] | undefined {
+  if (!value?.trim()) return undefined;
+  try {
+    const raw = JSON.parse(value) as unknown;
+    if (!Array.isArray(raw) || raw.length === 0) return undefined;
+    const out: { id: number; type: 'agency' | 'agent' }[] = [];
+    for (const item of raw) {
+      const r = agentIdFilterEntrySchema.safeParse(item);
+      if (r.success) out.push(r.data);
+    }
+    return out.length ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function getLanguageCode(request: NextRequest): 'en' | 'ar' {
   const acceptLanguage = request.headers.get('accept-language') || 'en';
   const first = acceptLanguage.split(',')[0]?.trim() || 'en';
@@ -155,8 +172,7 @@ export async function GET(request: NextRequest) {
       areaMin: parsed.areaMin,
       areaMax: parsed.areaMax,
       keyword: normalizeKeyword(parsed.keyword),
-      agentIds: parseOptionalIntList(parsed.agentIds)?.filter((n) => n >= 1),
-      agencyIds: parseOptionalIntList(parsed.agencyIds)?.filter((n) => n >= 1),
+      agentIds: parseAgentIdsFromQuery(parsed.agentIds),
       featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
 
@@ -313,7 +329,6 @@ export async function POST(request: NextRequest) {
       areaMax: body.area?.[1],
       keyword: normalizeKeyword(body.keyword),
       agentIds: body.agentIds?.length ? body.agentIds : undefined,
-      agencyIds: body.agencyIds?.length ? body.agencyIds : undefined,
       featureIds: body.featureIds?.length ? body.featureIds : undefined,
     };
 

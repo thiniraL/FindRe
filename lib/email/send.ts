@@ -1,6 +1,19 @@
 import { getFromEmail, getSmtpTransporter } from './smtp';
 import { buildPasswordResetEmail, buildPasswordResetEmailWithOtp, buildVerificationEmail, buildVerificationEmailWithOtp } from './templates';
 
+/** Format email/SMTP errors for logging (message, code, SMTP response) */
+export function formatEmailError(err: unknown): string {
+  if (err instanceof Error) {
+    const extra: string[] = [];
+    const r = err as Error & { code?: string; response?: string; responseCode?: number };
+    if (r.code) extra.push(`code=${r.code}`);
+    if (r.responseCode) extra.push(`responseCode=${r.responseCode}`);
+    if (r.response) extra.push(`response=${String(r.response).slice(0, 200)}`);
+    return extra.length ? `${err.message} (${extra.join(', ')})` : err.message;
+  }
+  return String(err);
+}
+
 function getFrontendBaseUrl(): URL {
   const raw = process.env.FRONTEND_URL;
   if (!raw) throw new Error('Missing FRONTEND_URL environment variable');
@@ -23,14 +36,19 @@ async function sendEmail(to: string, subject: string, text: string, html: string
   const from = getFromEmail();
 
   console.info('Sending email', { to, from, subject });
-  await transporter.sendMail({
-    from,
-    to,
-    subject,
-    text,
-    html,
-  });
-  console.info('Email sent', { to, subject });
+  try {
+    await transporter.sendMail({
+      from,
+      to,
+      subject,
+      text,
+      html,
+    });
+    console.info('Email sent', { to, subject });
+  } catch (err) {
+    console.error('Email send failed', { to, subject, error: formatEmailError(err) });
+    throw err;
+  }
 }
 
 export async function sendVerificationEmail(to: string, token: string): Promise<void> {

@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createUserWithVerificationToken, getUserByEmail } from '@/lib/db/queries/users';
 import { assignRoleToUser, getRoleByName } from '@/lib/db/queries/roles';
-import { sendVerificationEmailWithOtp } from '@/lib/email/send';
+import { sendVerificationEmailWithOtp, formatEmailError } from '@/lib/email/send';
 import { AppError, createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { registerSchema } from '@/lib/security/validation';
@@ -35,7 +35,7 @@ async function handler(request: NextRequest) {
     const otp = generateVerificationOtp();
     emailVerificationOtpCache.set(`email_verify:${normalizedEmail}`, otp);
     sendVerificationEmailWithOtp(user.email, otp).catch((err) => {
-      console.error('Failed to send verification email:', err);
+      console.error('Failed to send verification email:', formatEmailError(err));
     });
 
     // Assign default role (buyer) - use cache to avoid DB hit on every registration

@@ -147,14 +147,21 @@ export const searchQuerySchema = z.object({
   areaMax: z.coerce.number().min(0).optional(),
     /** Single string or comma-separated keywords, e.g. "beach,golf,marina" */
     keyword: z.string().optional(),
-    agentIds: z.string().optional(), // comma-separated IDs
-    agencyIds: z.string().optional(), // comma-separated agency IDs
-  featureIds: z.string().optional(), // comma-separated feature IDs
+    /** JSON array of { id: number, type: "agent"|"agency" } e.g. [{"id":1,"type":"agent"},{"id":2,"type":"agency"}] */
+    agentIds: z.string().optional(),
+    featureIds: z.string().optional(), // comma-separated feature IDs
   /** Use Typesense Natural Language Search (LLM parses q into filters/sorts). */
   nl_query: z.coerce.boolean().optional(),
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
+
+/** One agent/agency entry for agentIds filter. */
+export const agentIdFilterEntrySchema = z.object({
+  id: z.number().int().min(1),
+  type: z.enum(['agency', 'agent']),
+});
+export type AgentIdFilterEntry = z.infer<typeof agentIdFilterEntrySchema>;
 
 /** Search request body for POST. Supports arrays for multi-select filters. */
 export const searchBodySchema = z
@@ -174,8 +181,8 @@ export const searchBodySchema = z
     area: z.tuple([z.number().min(0), z.number().min(0)]).optional(),
     /** Keywords: string or array e.g. ["beach", "golf", "marina"]; joined to one search string */
     keyword: z.union([z.string(), z.array(z.string())]).optional(),
-    agentIds: z.array(z.number().int().min(1)).optional(),
-    agencyIds: z.array(z.number().int().min(1)).optional(),
+    /** Agent/agency filter: [{"id": number, "type": "agent"|"agency"}, ...]. Maps to Typesense agent_id and agency_id. */
+    agentIds: z.array(agentIdFilterEntrySchema).optional(),
     featureIds: z.array(z.number().int().min(1)).optional(),
     /** Use Typesense Natural Language Search (LLM parses q into filters/sorts). */
     nl_query: z.boolean().optional(),

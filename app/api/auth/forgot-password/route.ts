@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getUserByEmail, setPasswordResetToken } from '@/lib/db/queries/users';
 import { generateVerificationOtp } from '@/lib/auth/password';
-import { sendPasswordResetEmailWithOtp } from '@/lib/email/send';
+import { sendPasswordResetEmailWithOtp, formatEmailError } from '@/lib/email/send';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { forgotPasswordSchema } from '@/lib/security/validation';
@@ -30,7 +30,7 @@ async function handler(request: NextRequest) {
         console.info('Password reset email sent', { email: user.email });
       } catch (err) {
         // Don't fail the endpoint (avoid leaking account existence / keep UX stable)
-        console.error('Failed to send password reset email:', err);
+        console.error('Failed to send password reset email:', formatEmailError(err));
       }
     } else {
       console.info('Forgot password request for unknown email', { email: body.email });

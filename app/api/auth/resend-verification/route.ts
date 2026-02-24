@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getUserByEmail } from '@/lib/db/queries/users';
 import { generateVerificationOtp } from '@/lib/auth/password';
-import { sendVerificationEmailWithOtp } from '@/lib/email/send';
+import { sendVerificationEmailWithOtp, formatEmailError } from '@/lib/email/send';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { resendVerificationSchema } from '@/lib/security/validation';
@@ -22,7 +22,7 @@ async function handler(request: NextRequest) {
       try {
         await sendVerificationEmailWithOtp(user.email, otp);
       } catch (err) {
-        console.error('Failed to resend verification email:', err);
+        console.error('Failed to resend verification email:', formatEmailError(err));
       }
     }
 

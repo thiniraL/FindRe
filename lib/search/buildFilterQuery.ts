@@ -30,10 +30,8 @@ export type SearchFilterState = {
   areaMax?: number;
   /** Keyword → appended to full-text q */
   keyword?: string;
-  /** Agent IDs (one or more) */
-  agentIds?: number[];
-  /** Agency IDs (one or more); filter by agency_id in Typesense */
-  agencyIds?: number[];
+  /** Agent/agency filter: [{"id", "type": "agent"|"agency"}, ...]. Applied as agent_id and agency_id in Typesense. */
+  agentIds?: { id: number; type: 'agency' | 'agent' }[];
   /** Feature IDs from PROPERTY_DETAILS.feature_ids */
   featureIds?: number[];
 };
@@ -121,10 +119,10 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
     parts.push(`area_sqm:<=${state.areaMax}`);
   }
   if (state.agentIds?.length) {
-    parts.push(`agent_id:=[${state.agentIds.join(',')}]`);
-  }
-  if (state.agencyIds?.length) {
-    parts.push(`agency_id:=[${state.agencyIds.join(',')}]`);
+    const byAgent = state.agentIds.filter((e) => e.type === 'agent').map((e) => e.id);
+    const byAgency = state.agentIds.filter((e) => e.type === 'agency').map((e) => e.id);
+    if (byAgent.length) parts.push(`agent_id:=[${byAgent.join(',')}]`);
+    if (byAgency.length) parts.push(`agency_id:=[${byAgency.join(',')}]`);
   }
   if (state.featureIds?.length) {
     parts.push(`feature_ids:=[${state.featureIds.join(',')}]`);

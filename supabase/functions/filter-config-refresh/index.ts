@@ -314,6 +314,7 @@ function mergeOptionsIntoConfig(
           filter.max = priceRange.max;
           filter.defaultMin = priceRange.min;
           filter.defaultMax = priceRange.max;
+          (filter as Record<string, unknown>).apiSample = [priceRange.min, priceRange.max];
         }
         break;
       case 'area':
@@ -322,14 +323,20 @@ function mergeOptionsIntoConfig(
           filter.max = areaRange.max;
           filter.defaultMin = areaRange.min;
           filter.defaultMax = areaRange.max;
+          (filter as Record<string, unknown>).apiSample = [areaRange.min, areaRange.max];
         }
         break;
       case 'featureIds':
         filter.options = featureOptions;
         break;
       case 'agentIds':
+        (filter as Record<string, unknown>).type = 'multi-select';
         (filter as Record<string, unknown>).searchable = true;
         delete (filter as Record<string, unknown>).options;
+        (filter as Record<string, unknown>).apiSample = [
+          { id: 1, type: 'agent' },
+          { id: 2, type: 'agency' },
+        ];
         break;
       case 'keyword':
         filter.options = keywordOptions;
