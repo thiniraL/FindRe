@@ -91,6 +91,7 @@ export async function GET(
       bathrooms: row.bathrooms ?? null,
       areaSqm: row.area_sqm ?? null,
       areaSqft: row.area_sqft ?? null,
+      profileImageUrl: row.agent_profile_image_url ?? null,
       features: Array.isArray(row.features_jsonb) ? row.features_jsonb : [],
       images: {
         primaryImageUrl: row.primary_image_url ?? (Array.isArray(row.image_urls) ? row.image_urls[0] ?? null : null),
@@ -106,6 +107,14 @@ export async function GET(
               email: row.agent_email ?? null,
               phone: row.agent_phone ?? null,
               whatsapp: row.agent_whatsapp ?? null,
+              agency:
+                row.agency_id != null
+                  ? {
+                      id: row.agency_id,
+                      name: row.agency_name ?? null,
+                      logoUrl: row.agency_logo_url ?? null,
+                    }
+                  : null,
             }
           : null,
     };

@@ -8,7 +8,6 @@ import {
   getPriceRange,
   getAreaRange,
   getFeaturesForFilter,
-  getAgentsForFilter,
   getKeywordsForFilter,
 } from '@/lib/db/queries/filterOptions';
 
@@ -42,7 +41,6 @@ export async function mergeFilterOptions(
     priceRange,
     areaRange,
     featureOptions,
-    agentOptions,
     keywordOptions,
   ] = await Promise.all([
     getPropertyCountByPurpose(scope),
@@ -52,7 +50,6 @@ export async function mergeFilterOptions(
     getPriceRange(scope),
     getAreaRange(scope),
     getFeaturesForFilter(scope),
-    getAgentsForFilter(scope),
     getKeywordsForFilter(),
   ]);
 
@@ -105,7 +102,8 @@ export async function mergeFilterOptions(
         filter.options = featureOptions;
         break;
       case 'agentIds':
-        filter.options = agentOptions;
+        filter.searchable = true;
+        delete filter.options;
         break;
       case 'keyword':
         filter.options = keywordOptions;

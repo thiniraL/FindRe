@@ -51,6 +51,9 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'feature_ids', type: 'int32[]', facet: true, optional: true },
     { name: 'features', type: 'string[]', facet: true, optional: true },
     { name: 'agent_id', type: 'int32', facet: true, optional: true },
+    { name: 'agency_id', type: 'int32', facet: true, optional: true },
+    { name: 'agency_name', type: 'string', optional: true },
+    { name: 'profile_image_url', type: 'string', optional: true },
     { name: 'status', type: 'string', facet: true, optional: true },
     { name: 'completion_status', type: 'string', facet: true, optional: true },
     { name: 'is_off_plan', type: 'bool', facet: true, optional: true },
@@ -222,6 +225,9 @@ type PropertyDoc = {
   feature_ids: number[] | null;
   features: string[] | null;
   agent_id: number | null;
+  agency_id: number | null;
+  agency_name: string | null;
+  profile_image_url: string | null;
   agent_name: string | null;
   agent_email: string | null;
   agent_phone: string | null;
@@ -337,6 +343,26 @@ serve(async (req) => {
     // Ensure properties collection exists before first import
     await ensureCollection(PROPERTIES_COLLECTION_SCHEMA);
 
+    // Delete from Typesense any properties whose agent or agency status is not active
+    const cleanupRes = await pool.connect().then(async (client) => {
+      try {
+        const r = await client.queryObject<{ property_id: number }>(
+          `SELECT p.property_id
+           FROM property.PROPERTIES p
+           JOIN business.AGENTS a ON a.agent_id = p.agent_id
+           LEFT JOIN business.AGENCIES ag ON ag.agency_id = a.agency_id
+           WHERE LOWER(TRIM(COALESCE(a.status, ''))) <> 'active'
+              OR (ag.agency_id IS NOT NULL AND LOWER(TRIM(COALESCE(ag.status, ''))) <> 'active')`
+        );
+        return r.rows.map((row) => String(row.property_id));
+      } finally {
+        client.release();
+      }
+    });
+    if (cleanupRes.length > 0) {
+      await deleteDocs(cleanupRes);
+    }
+
     while (true) {
       let docs: PropertyDoc[] = [];
       const client = await pool.connect();
@@ -361,10 +387,15 @@ serve(async (req) => {
           feature_ids: number[] | null;
           features: string[] | null;
           agent_id: number | null;
+          agency_id: number | null;
+          agency_name: string | null;
+          profile_image_url: string | null;
           agent_name: string | null;
           agent_email: string | null;
           agent_phone: string | null;
           agent_whatsapp: string | null;
+          agent_status: string | null;
+          agency_status: string | null;
           status: string | null;
           completion_status: string | null;
           is_off_plan: boolean | null;
@@ -402,10 +433,15 @@ serve(async (req) => {
               p.address,
               pd.feature_ids AS feature_ids,
               a.agent_id,
+              ag.agency_id AS agency_id,
+              (ag.translations->'en'->>'name') AS agency_name,
+              a.profile_image_url,
               a.agent_name,
               a.email AS agent_email,
               a.phone AS agent_phone,
               a.whatsapp AS agent_whatsapp,
+              a.status AS agent_status,
+              ag.status AS agency_status,
               p.status,
               p.completion_status,
               p.is_off_plan,
@@ -416,7 +452,8 @@ serve(async (req) => {
                 p.updated_at,
                 COALESCE(pd.updated_at, p.updated_at),
                 COALESCE(l.updated_at, p.updated_at),
-                COALESCE(a.updated_at, p.updated_at)
+                COALESCE(a.updated_at, p.updated_at),
+                COALESCE(ag.updated_at, p.updated_at)
               ) AS updated_at,
               p.title_translations->>'en' AS title_en,
               p.title_translations->>'ar' AS title_ar,
@@ -428,6 +465,7 @@ serve(async (req) => {
             LEFT JOIN property.PROPERTY_DETAILS pd ON pd.property_id = p.property_id
             LEFT JOIN property.PURPOSES pur ON pur.purpose_id = p.purpose_id
             LEFT JOIN business.AGENTS a ON a.agent_id = p.agent_id
+            LEFT JOIN business.AGENCIES ag ON ag.agency_id = a.agency_id
           )
           SELECT
             b.*,
@@ -528,6 +566,14 @@ serve(async (req) => {
               toDelete.push(String(r.property_id));
               return false;
             }
+            if (r.agent_id != null && !isActive(r.agent_status)) {
+              toDelete.push(String(r.property_id));
+              return false;
+            }
+            if (r.agency_id != null && !isActive(r.agency_status)) {
+              toDelete.push(String(r.property_id));
+              return false;
+            }
             return true;
           })
           .map((r) => {
@@ -555,6 +601,9 @@ serve(async (req) => {
               feature_ids: r.feature_ids ?? null,
               features: r.features ?? null,
               agent_id: r.agent_id,
+              agency_id: r.agency_id ?? null,
+              agency_name: r.agency_name ?? null,
+              profile_image_url: r.profile_image_url ?? null,
               agent_name: r.agent_name,
               agent_email: r.agent_email,
               agent_phone: r.agent_phone,

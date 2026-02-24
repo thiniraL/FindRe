@@ -198,33 +198,6 @@ async function getFeatures(
   }));
 }
 
-async function getAgents(
-  client: any,
-  purposeKey: string,
-  countryId: number | null,
-  lang: string
-): Promise<OptionItem[]> {
-  const res = await client.queryObject<{
-    agent_id: number;
-    agent_name: string;
-    agency_name: string | null;
-  }>(
-    `SELECT DISTINCT ON (a.agent_id) a.agent_id, a.agent_name, (ag.translations->$3)->>'name' AS agency_name
-     FROM business.AGENTS a
-     LEFT JOIN business.AGENCIES ag ON a.agency_id = ag.agency_id
-     JOIN property.PROPERTIES p ON p.agent_id = a.agent_id
-     JOIN property.PURPOSES pur ON p.purpose_id = pur.purpose_id
-     JOIN property.LOCATIONS l ON p.location_id = l.location_id
-     WHERE pur.purpose_key = $1 AND ($2::int IS NULL OR l.country_id = $2)
-     ORDER BY a.agent_id, a.agent_name`,
-    [purposeKey, countryId, lang]
-  );
-  return res.rows.map((r) => ({
-    value: r.agent_id,
-    label: r.agency_name ? `${r.agent_name} (${r.agency_name})` : r.agent_name || String(r.agent_id),
-  }));
-}
-
 async function getKeywords(client: any): Promise<OptionItem[]> {
   const res = await client.queryObject<{ keyword_key: string; display_label: string | null }>(
     `SELECT keyword_key, display_label FROM property.KEYWORDS WHERE is_active = TRUE ORDER BY display_order ASC, keyword_key`
@@ -250,7 +223,6 @@ async function fetchOptionsForScope(
     priceRange,
     areaRange,
     featureOptions,
-    agentOptions,
     keywordOptions,
   ] = await Promise.all([
     getPropertyCount(client, purposeKey, countryId, lang),
@@ -260,7 +232,6 @@ async function fetchOptionsForScope(
     getPriceRange(client, purposeKey, countryId, currencyId),
     getAreaRange(client, purposeKey, countryId),
     getFeatures(client, purposeKey, countryId, lang),
-    getAgents(client, purposeKey, countryId, lang),
     getKeywords(client),
   ]);
 
@@ -272,7 +243,6 @@ async function fetchOptionsForScope(
     priceRange,
     areaRange,
     featureOptions,
-    agentOptions,
     keywordOptions,
   };
 }
@@ -285,7 +255,6 @@ type MergedOpts = {
   priceRange: RangeResult;
   areaRange: RangeResult;
   featureOptions: OptionItem[];
-  agentOptions: OptionItem[];
   keywordOptions: OptionItem[];
 };
 
@@ -311,7 +280,7 @@ function mergeOptionsIntoConfig(
   const cfg = JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
   const filtersIn = (cfg.filters as Record<string, unknown>[] | undefined) ?? [];
   const meta = cfg.meta as Record<string, unknown> | undefined;
-  const { countResult, completionOptions, mainPropertyTypeOptions, propertyTypeOptions, priceRange, areaRange, featureOptions, agentOptions, keywordOptions } = opts;
+  const { countResult, completionOptions, mainPropertyTypeOptions, propertyTypeOptions, priceRange, areaRange, featureOptions, keywordOptions } = opts;
   const totalCount = countResult.count;
   const purposeLabel = countResult.purpose_label || purposeKey;
   if (meta && typeof meta === 'object') {
@@ -359,7 +328,8 @@ function mergeOptionsIntoConfig(
         filter.options = featureOptions;
         break;
       case 'agentIds':
-        filter.options = agentOptions;
+        (filter as Record<string, unknown>).searchable = true;
+        delete (filter as Record<string, unknown>).options;
         break;
       case 'keyword':
         filter.options = keywordOptions;

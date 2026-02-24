@@ -34,6 +34,9 @@ export type PropertyDetailRow = {
   agent_email: string | null;
   agent_phone: string | null;
   agent_whatsapp: string | null;
+  agency_id: number | null;
+  agency_name: string | null;
+  agency_logo_url: string | null;
   primary_image_url: string | null;
   /** All images in display order; each has url and is_featured (featured set max 5). */
   image_urls: string[] | null;
@@ -90,6 +93,9 @@ export async function getPropertyById(
       a.email AS agent_email,
       a.phone AS agent_phone,
       a.whatsapp AS agent_whatsapp,
+      ag.agency_id,
+      COALESCE(ag.translations->$2->>'name', ag.translations->'en'->>'name') AS agency_name,
+      ag.logo_url AS agency_logo_url,
       primary_img.image_url AS primary_image_url,
       (
         SELECT array_agg(COALESCE(pi.compressed_image_url, pi.image_url) ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC)
@@ -109,6 +115,7 @@ export async function getPropertyById(
     JOIN property.PURPOSES pur ON pur.purpose_id = p.purpose_id
     LEFT JOIN property.PROPERTY_TYPES pt ON cardinality(p.property_type_ids) > 0 AND pt.type_id = (p.property_type_ids)[1]
     LEFT JOIN business.AGENTS a ON a.agent_id = p.agent_id
+    LEFT JOIN business.AGENCIES ag ON ag.agency_id = a.agency_id
     LEFT JOIN LATERAL (
       SELECT COALESCE(pi.compressed_image_url, pi.image_url) AS image_url
       FROM property.PROPERTY_IMAGES pi

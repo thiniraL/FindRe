@@ -62,6 +62,9 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'feature_ids', type: 'int32[]', facet: true, optional: true },
     { name: 'features', type: 'string[]', facet: true, optional: true },
     { name: 'agent_id', type: 'int32', facet: true, optional: true },
+    { name: 'agency_id', type: 'int32', facet: true, optional: true },
+    { name: 'agency_name', type: 'string', optional: true },
+    { name: 'profile_image_url', type: 'string', optional: true },
     { name: 'status', type: 'string', facet: true, optional: true },
     { name: 'completion_status', type: 'string', facet: true, optional: true },
     { name: 'is_off_plan', type: 'bool', facet: true, optional: true },
@@ -99,5 +102,5 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
 };
 
 export const PROPERTIES_QUERY_BY =
-  'title_en,title_ar,address,city_en,area_en,community_en,agent_name';
+  'title_en,title_ar,address,city_en,area_en,community_en,agent_name,agency_name';
 

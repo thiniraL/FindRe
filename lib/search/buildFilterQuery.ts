@@ -32,6 +32,8 @@ export type SearchFilterState = {
   keyword?: string;
   /** Agent IDs (one or more) */
   agentIds?: number[];
+  /** Agency IDs (one or more); filter by agency_id in Typesense */
+  agencyIds?: number[];
   /** Feature IDs from PROPERTY_DETAILS.feature_ids */
   featureIds?: number[];
 };
@@ -120,6 +122,9 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
   }
   if (state.agentIds?.length) {
     parts.push(`agent_id:=[${state.agentIds.join(',')}]`);
+  }
+  if (state.agencyIds?.length) {
+    parts.push(`agency_id:=[${state.agencyIds.join(',')}]`);
   }
   if (state.featureIds?.length) {
     parts.push(`feature_ids:=[${state.featureIds.join(',')}]`);

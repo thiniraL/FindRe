@@ -147,6 +147,7 @@ export const searchQuerySchema = z.object({
     /** Single string or comma-separated keywords, e.g. "beach,golf,marina" */
     keyword: z.string().optional(),
     agentIds: z.string().optional(), // comma-separated IDs
+    agencyIds: z.string().optional(), // comma-separated agency IDs
   featureIds: z.string().optional(), // comma-separated feature IDs
   /** Use Typesense Natural Language Search (LLM parses q into filters/sorts). */
   nl_query: z.coerce.boolean().optional(),
@@ -173,6 +174,7 @@ export const searchBodySchema = z
     /** Keywords: string or array e.g. ["beach", "golf", "marina"]; joined to one search string */
     keyword: z.union([z.string(), z.array(z.string())]).optional(),
     agentIds: z.array(z.number().int().min(1)).optional(),
+    agencyIds: z.array(z.number().int().min(1)).optional(),
     featureIds: z.array(z.number().int().min(1)).optional(),
     /** Use Typesense Natural Language Search (LLM parses q into filters/sorts). */
     nl_query: z.boolean().optional(),

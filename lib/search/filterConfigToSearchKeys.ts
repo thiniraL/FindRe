@@ -17,6 +17,7 @@ export const FILTER_IDS_AS_SEARCH_KEYS = [
   'bathrooms',
   'keyword',
   'agentIds',
+  'agencyIds',
   'featureIds',
 ] as const;
 

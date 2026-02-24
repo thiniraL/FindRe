@@ -343,3 +343,101 @@ export async function getAgentsForFilter(
     };
   });
 }
+
+export type AgencyAgentSearchItem = {
+  label: string;
+  value: number;
+  type: 'agency' | 'agent';
+};
+
+/**
+ * Search agencies and agents by text; returns dropdown options with label, value, type.
+ * Only active agencies and agents (status = 'active' case-insensitive).
+ * Limit per type (default 10 each). Use searchAgenciesAndAgentsPaginated for page/limit/total.
+ */
+export async function searchAgenciesAndAgents(
+  searchTerm: string,
+  options?: { languageCode?: string; limitPerType?: number }
+): Promise<AgencyAgentSearchItem[]> {
+  const result = await searchAgenciesAndAgentsPaginated(searchTerm, {
+    languageCode: options?.languageCode,
+    page: 1,
+    limit: Math.min(Math.max(options?.limitPerType ?? 10, 1), 50),
+  });
+  return result.items;
+}
+
+export type AgencyAgentSearchPaginatedResult = {
+  items: AgencyAgentSearchItem[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+/**
+ * Search agencies and agents by text with pagination. Returns items, total, page, limit.
+ * Only active agencies and agents (status = 'active' case-insensitive).
+ */
+export async function searchAgenciesAndAgentsPaginated(
+  searchTerm: string,
+  options?: { languageCode?: string; page?: number; limit?: number }
+): Promise<AgencyAgentSearchPaginatedResult> {
+  const lang = options?.languageCode === 'ar' ? 'ar' : 'en';
+  const page = Math.max(options?.page ?? 1, 1);
+  const limit = Math.min(Math.max(options?.limit ?? 10, 1), 50);
+  const offset = (page - 1) * limit;
+  const term = searchTerm.trim();
+
+  if (!term) {
+    return { items: [], total: 0, page, limit };
+  }
+
+  const agencyWhere = `LOWER(TRIM(COALESCE(status, ''))) = 'active'
+    AND (COALESCE(translations->'en'->>'name', '') ILIKE '%' || $1 || '%'
+         OR COALESCE(translations->'ar'->>'name', '') ILIKE '%' || $1 || '%')`;
+  const agentWhere = `LOWER(TRIM(COALESCE(a.status, ''))) = 'active'
+    AND (a.agent_name ILIKE '%' || $1 || '%' OR COALESCE(a.email, '') ILIKE '%' || $1 || '%')`;
+
+  const [countRes, dataRes] = await Promise.all([
+    query<{ count: string }>(
+      `
+      SELECT (
+        (SELECT COUNT(*) FROM business.AGENCIES WHERE ${agencyWhere})
+        + (SELECT COUNT(*) FROM business.AGENTS a LEFT JOIN business.AGENCIES ag ON ag.agency_id = a.agency_id WHERE ${agentWhere})
+      )::text AS count
+      `,
+      [term]
+    ),
+    query<{ value: number; label: string; type: string }>(
+      `
+      (SELECT agency_id AS value, COALESCE(translations->$2->>'name', translations->'en'->>'name') AS label, 'agency' AS type
+       FROM business.AGENCIES
+       WHERE LOWER(TRIM(COALESCE(status, ''))) = 'active'
+         AND (COALESCE(translations->'en'->>'name', '') ILIKE '%' || $1 || '%'
+              OR COALESCE(translations->'ar'->>'name', '') ILIKE '%' || $1 || '%'))
+      UNION ALL
+      (SELECT a.agent_id AS value,
+              CASE WHEN (ag.translations->$2->>'name') IS NOT NULL AND (ag.translations->$2->>'name') <> ''
+                   THEN a.agent_name || ' (' || (ag.translations->$2->>'name') || ')'
+                   ELSE COALESCE(a.agent_name, a.agent_id::text) END AS label,
+              'agent' AS type
+       FROM business.AGENTS a
+       LEFT JOIN business.AGENCIES ag ON ag.agency_id = a.agency_id
+       WHERE LOWER(TRIM(COALESCE(a.status, ''))) = 'active'
+         AND (a.agent_name ILIKE '%' || $1 || '%' OR COALESCE(a.email, '') ILIKE '%' || $1 || '%'))
+      ORDER BY label
+      LIMIT $3 OFFSET $4
+      `,
+      [term, lang, limit, offset]
+    ),
+  ]);
+
+  const total = parseInt(countRes.rows[0]?.count ?? '0', 10) || 0;
+  const items: AgencyAgentSearchItem[] = dataRes.rows.map((r) => ({
+    label: r.label || String(r.value),
+    value: r.value,
+    type: r.type === 'agency' ? ('agency' as const) : ('agent' as const),
+  }));
+
+  return { items, total, page, limit };
+}

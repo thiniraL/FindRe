@@ -47,6 +47,9 @@ type TypesensePropertyDoc = {
   address?: string;
   features?: string[];
   agent_id?: number;
+  agency_id?: number;
+  agency_name?: string;
+  profile_image_url?: string;
   agent_name?: string;
   agent_email?: string;
   agent_phone?: string;
@@ -153,11 +156,14 @@ export async function GET(request: NextRequest) {
       areaMax: parsed.areaMax,
       keyword: normalizeKeyword(parsed.keyword),
       agentIds: parseOptionalIntList(parsed.agentIds)?.filter((n) => n >= 1),
+      agencyIds: parseOptionalIntList(parsed.agencyIds)?.filter((n) => n >= 1),
       featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
 
     // When nl_query=true we use Typesense NL (LLM); skip rule-based parse of q. Otherwise merge q into filter state.
-    const useTypesenseNl = parsed.nl_query === true;
+    // If nl_query is not sent but q has a value, treat as nl_query=true (use Typesense NL when model is set).
+    const useTypesenseNl =
+      parsed.nl_query === true || (parsed.nl_query === undefined && !!parsed.q?.trim());
     if (!useTypesenseNl && parsed.q?.trim()) {
       const nlMapped = parseNaturalLanguageQuery(parsed.q);
       mergeNaturalLanguageIntoState(filterState, nlMapped);
@@ -247,9 +253,12 @@ async function runSearch(
         location,
         price: d.price ?? null,
         area: d.area_sqm ?? null,
+        areaSqft: d.area_sqft ?? null,
+        areaSqm: d.area_sqm ?? null,
         bedrooms: d.bedrooms ?? null,
         bathrooms: d.bathrooms ?? null,
         primaryImageUrl: d.primary_image_url ?? null,
+        profileImageUrl: d.profile_image_url ?? null,
         agent: d.agent_id
           ? {
               id: d.agent_id,
@@ -257,6 +266,10 @@ async function runSearch(
               email: d.agent_email ?? null,
               phone: d.agent_phone ?? null,
               whatsapp: d.agent_whatsapp ?? null,
+              profileImageUrl: d.profile_image_url ?? null,
+              agency: d.agency_id
+                ? { id: d.agency_id, name: d.agency_name ?? null }
+                : null,
             }
           : null,
         additionalImageUrls: d.additional_image_urls ?? [],
@@ -300,10 +313,12 @@ export async function POST(request: NextRequest) {
       areaMax: body.area?.[1],
       keyword: normalizeKeyword(body.keyword),
       agentIds: body.agentIds?.length ? body.agentIds : undefined,
+      agencyIds: body.agencyIds?.length ? body.agencyIds : undefined,
       featureIds: body.featureIds?.length ? body.featureIds : undefined,
     };
 
-    const useTypesenseNl = body.nl_query === true;
+    const useTypesenseNl =
+      body.nl_query === true || (body.nl_query === undefined && !!body.q?.trim());
     if (!useTypesenseNl && body.q?.trim()) {
       const nlMapped = parseNaturalLanguageQuery(body.q);
       mergeNaturalLanguageIntoState(filterState, nlMapped);

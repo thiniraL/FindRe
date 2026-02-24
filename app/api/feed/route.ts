@@ -60,6 +60,9 @@ type TypesensePropertyDoc = {
   address?: string;
   features?: string[];
   agent_id?: number;
+  agency_id?: number;
+  agency_name?: string;
+  profile_image_url?: string;
   agent_name?: string;
   agent_email?: string;
   agent_phone?: string;
@@ -200,10 +203,13 @@ type FeedItem = {
     location: string | null;
     price: number | null;
     area: number | null;
+    areaSqft: number | null;
+    areaSqm: number | null;
     bedrooms: number | null;
     bathrooms: number | null;
     primaryImageUrl: string | null;
-    agent: { id: number; name: string | null; email: string | null; phone: string | null; whatsapp: string | null } | null;
+    profileImageUrl: string | null;
+    agent: { id: number; name: string | null; email: string | null; phone: string | null; whatsapp: string | null; profileImageUrl: string | null; agency: { id: number; name: string | null } | null } | null;
     isFeatured: boolean;
     featuredRank: number | null;
     additionalImageUrls: string[];
@@ -228,9 +234,12 @@ function docToFeedItem(
       location,
       price: d.price ?? null,
       area: d.area_sqm ?? null,
+      areaSqft: d.area_sqft ?? null,
+      areaSqm: d.area_sqm ?? null,
       bedrooms: d.bedrooms ?? null,
       bathrooms: d.bathrooms ?? null,
       primaryImageUrl: d.primary_image_url ?? null,
+      profileImageUrl: d.profile_image_url ?? null,
       agent: d.agent_id
         ? {
             id: d.agent_id,
@@ -238,6 +247,10 @@ function docToFeedItem(
             email: d.agent_email ?? null,
             phone: d.agent_phone ?? null,
             whatsapp: d.agent_whatsapp ?? null,
+            profileImageUrl: d.profile_image_url ?? null,
+            agency: d.agency_id
+              ? { id: d.agency_id, name: d.agency_name ?? null }
+              : null,
           }
         : null,
       isFeatured,

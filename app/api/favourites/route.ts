@@ -21,10 +21,15 @@ type TypesensePropertyDoc = {
   purpose_key?: string;
   property_type_id?: number;
   price?: number;
+  area_sqft?: number;
+  area_sqm?: number;
   bedrooms?: number;
   bathrooms?: number;
   address?: string;
   agent_id?: number;
+  agency_id?: number;
+  agency_name?: string;
+  profile_image_url?: string;
   agent_name?: string;
   agent_email?: string;
   agent_phone?: string;
@@ -74,10 +79,14 @@ type FavouriteItem = {
     title: string | null;
     location: string | null;
     price: number | null;
+    area: number | null;
+    areaSqft: number | null;
+    areaSqm: number | null;
     bedrooms: number | null;
     bathrooms: number | null;
     primaryImageUrl: string | null;
-    agent: { id: number; name: string | null; email: string | null; phone: string | null; whatsapp: string | null } | null;
+    profileImageUrl: string | null;
+    agent: { id: number; name: string | null; email: string | null; phone: string | null; whatsapp: string | null; profileImageUrl: string | null; agency: { id: number; name: string | null } | null } | null;
     isFeatured: boolean;
     featuredRank: number | null;
     additionalImageUrls: string[];
@@ -95,9 +104,13 @@ function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): Favouri
       title: lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
       location,
       price: d.price ?? null,
+      area: d.area_sqm ?? null,
+      areaSqft: d.area_sqft ?? null,
+      areaSqm: d.area_sqm ?? null,
       bedrooms: d.bedrooms ?? null,
       bathrooms: d.bathrooms ?? null,
       primaryImageUrl: d.primary_image_url ?? null,
+      profileImageUrl: d.profile_image_url ?? null,
       agent: d.agent_id
         ? {
             id: d.agent_id,
@@ -105,6 +118,8 @@ function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): Favouri
             email: d.agent_email ?? null,
             phone: d.agent_phone ?? null,
             whatsapp: d.agent_whatsapp ?? null,
+            profileImageUrl: d.profile_image_url ?? null,
+            agency: d.agency_id ? { id: d.agency_id, name: d.agency_name ?? null } : null,
           }
         : null,
       isFeatured: Boolean(d.is_featured),
