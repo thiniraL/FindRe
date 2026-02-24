@@ -193,26 +193,29 @@ export async function setEmailVerificationToken(
 }
 
 /**
- * Reset password using token
+ * Reset password using email and 6-digit code
  */
 export async function resetPassword(
-  token: string,
+  email: string,
+  code: string,
   newPassword: string
 ): Promise<User> {
+  const normalizedEmail = email.toLowerCase().trim();
   const passwordHash = await hashPassword(newPassword);
   const result = await query<User>(
     `UPDATE login.users
      SET password_hash = $1,
          password_reset_token = NULL,
          password_reset_expires = NULL
-     WHERE password_reset_token = $2
-       AND password_reset_expires >= $3
+     WHERE email = $2
+       AND password_reset_token = $3
+       AND password_reset_expires >= $4
      RETURNING ${USER_COLUMNS}`,
-    [passwordHash, token, new Date().toISOString()]
+    [passwordHash, normalizedEmail, code, new Date().toISOString()]
   );
 
   if (!result.rows[0]) {
-    throw new AppError('Invalid or expired reset token', 400, 'INVALID_RESET_TOKEN');
+    throw new AppError('Invalid or expired reset code', 400, 'INVALID_RESET_TOKEN');
   }
 
   return result.rows[0];

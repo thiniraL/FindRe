@@ -9,7 +9,7 @@ async function handler(request: NextRequest) {
     const body = await validateBody(request, resetPasswordSchema);
 
     // Reset password
-    const user = await resetPassword(body.token, body.newPassword);
+    const user = await resetPassword(body.email, body.code, body.newPassword);
 
     // Revoke all refresh tokens for security
     await revokeAllUserRefreshTokens(user.id);

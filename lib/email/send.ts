@@ -1,5 +1,5 @@
 import { getFromEmail, getSmtpTransporter } from './smtp';
-import { buildPasswordResetEmail, buildVerificationEmail, buildVerificationEmailWithOtp } from './templates';
+import { buildPasswordResetEmail, buildPasswordResetEmailWithOtp, buildVerificationEmail, buildVerificationEmailWithOtp } from './templates';
 
 function getFrontendBaseUrl(): URL {
   const raw = process.env.FRONTEND_URL;
@@ -48,6 +48,12 @@ export async function sendVerificationEmailWithOtp(to: string, otp: string): Pro
 export async function sendPasswordResetEmail(to: string, token: string): Promise<void> {
   const resetUrl = buildFrontendLink('/reset-password', token);
   const { subject, text, html } = buildPasswordResetEmail(resetUrl);
+  await sendEmail(to, subject, text, html);
+}
+
+/** Send password reset email with 6-digit code only (no link) */
+export async function sendPasswordResetEmailWithOtp(to: string, otp: string): Promise<void> {
+  const { subject, text, html } = buildPasswordResetEmailWithOtp(otp);
   await sendEmail(to, subject, text, html);
 }
 

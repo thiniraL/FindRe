@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getUserByEmail, setPasswordResetToken } from '@/lib/db/queries/users';
-import { generateToken } from '@/lib/auth/password';
-import { sendPasswordResetEmail } from '@/lib/email/send';
+import { generateVerificationOtp } from '@/lib/auth/password';
+import { sendPasswordResetEmailWithOtp } from '@/lib/email/send';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { forgotPasswordSchema } from '@/lib/security/validation';
@@ -16,17 +16,17 @@ async function handler(request: NextRequest) {
     
     // Always return success (security: don't reveal if email exists)
     if (user) {
-      // Generate reset token
-      const resetToken = generateToken();
+      // Generate 6-digit reset code
+      const resetCode = generateVerificationOtp();
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-      console.info('Password reset token generated', { userId: user.id, email: user.email });
-      await setPasswordResetToken(user.email, resetToken, expiresAt);
-      console.info('Password reset token stored', { userId: user.id, email: user.email });
+      console.info('Password reset code generated', { userId: user.id, email: user.email });
+      await setPasswordResetToken(user.email, resetCode, expiresAt);
+      console.info('Password reset code stored', { userId: user.id, email: user.email });
 
       try {
         console.info('Sending password reset email', { email: user.email });
-        await sendPasswordResetEmail(user.email, resetToken);
+        await sendPasswordResetEmailWithOtp(user.email, resetCode);
         console.info('Password reset email sent', { email: user.email });
       } catch (err) {
         // Don't fail the endpoint (avoid leaking account existence / keep UX stable)
@@ -37,7 +37,7 @@ async function handler(request: NextRequest) {
     }
 
     return createSuccessResponse({
-      message: 'If an account exists with this email, a password reset link has been sent.',
+      message: 'If an account exists with this email, a password reset code has been sent.',
     });
   } catch (error) {
     return createErrorResponse(error);

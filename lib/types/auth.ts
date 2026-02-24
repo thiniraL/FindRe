@@ -108,7 +108,8 @@ export interface PasswordResetRequest {
 }
 
 export interface PasswordResetConfirm {
-  token: string;
+  email: string;
+  code: string;
   newPassword: string;
   confirmPassword: string;
 }
