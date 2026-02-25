@@ -7,7 +7,9 @@ import {
 import { validateParams } from '@/lib/security/validation';
 import { propertyIdSchema } from '@/lib/security/validation';
 import { getPropertyById } from '@/lib/db/queries/propertyDetails';
+import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
 import { propertyDetailCache } from '@/lib/cache';
+import { verifyAccessToken } from '@/lib/auth/jwt';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +18,19 @@ function getLanguageCode(request: NextRequest): 'en' | 'ar' {
   const first = acceptLanguage.split(',')[0]?.trim() || 'en';
   const lang = first.split('-')[0]?.trim().toLowerCase() || 'en';
   return lang === 'ar' ? 'ar' : 'en';
+}
+
+function tryGetUserIdFromAuthHeader(request: NextRequest): string | null {
+  const authHeader = request.headers.get('authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.substring(7).trim();
+  if (!token) return null;
+  try {
+    const payload = verifyAccessToken(token);
+    return payload.userId;
+  } catch {
+    return null;
+  }
 }
 
 export async function GET(
@@ -60,6 +75,19 @@ export async function GET(
       .filter(Boolean)
       .filter((v, i, a) => a.indexOf(v) === i)
       .join(', ') || null;
+
+    const userId = tryGetUserIdFromAuthHeader(request);
+    const sessionId = request.headers.get('x-session-id')?.trim() ?? '';
+    let isLiked = false;
+    if (userId || sessionId) {
+      const viewStatusMap = await getPropertyViewStatus(
+        [row.property_id],
+        sessionId,
+        userId ?? null
+      );
+      const status = viewStatusMap.get(row.property_id);
+      if (status) isLiked = status.isLiked;
+    }
 
     const payload = {
       id: row.property_id,
@@ -117,6 +145,7 @@ export async function GET(
                   : null,
             }
           : null,
+      isLiked,
     };
 
     return createSuccessResponse(payload);
