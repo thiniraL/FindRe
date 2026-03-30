@@ -21,15 +21,15 @@ export class AppError extends Error {
 
 export function createErrorResponse(error: unknown): NextResponse {
   if (error instanceof ZodError) {
+    const message =
+      error.issues.length > 0
+        ? error.issues.map((issue) => issue.message).join('. ')
+        : 'Validation error';
     return NextResponse.json(
       {
         error: {
-          message: 'Validation error',
+          message,
           code: 'VALIDATION_ERROR',
-          details: error.issues.map((issue) => ({
-            path: issue.path.join('.'),
-            message: issue.message,
-          })),
         },
       },
       { status: 400 }
