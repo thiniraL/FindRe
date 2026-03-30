@@ -1,5 +1,9 @@
 import { NextRequest } from 'next/server';
-import { createUserWithVerificationToken, getUserByEmail } from '@/lib/db/queries/users';
+import {
+  createUserWithVerificationToken,
+  deleteUserById,
+  getUserByEmail,
+} from '@/lib/db/queries/users';
 import { assignRoleToUser, getRoleByName } from '@/lib/db/queries/roles';
 import { sendVerificationEmailWithOtp, formatEmailError } from '@/lib/email/send';
 import { AppError, createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
@@ -30,13 +34,25 @@ async function handler(request: NextRequest) {
       preferredLanguageCode
     );
 
-    // Send 6-digit OTP only (no link) in background
     const normalizedEmail = body.email.toLowerCase().trim();
     const otp = generateVerificationOtp();
-    emailVerificationOtpCache.set(`email_verify:${normalizedEmail}`, otp);
-    sendVerificationEmailWithOtp(user.email, otp).catch((err) => {
+    const otpCacheKey = `email_verify:${normalizedEmail}`;
+    emailVerificationOtpCache.set(otpCacheKey, otp);
+
+    try {
+      await sendVerificationEmailWithOtp(user.email, otp);
+    } catch (err) {
+      emailVerificationOtpCache.delete(otpCacheKey);
       console.error('Failed to send verification email:', formatEmailError(err));
-    });
+      await deleteUserById(user.id).catch((delErr) => {
+        console.error('Failed to roll back user after email failure:', delErr);
+      });
+      throw new AppError(
+        'Could not send verification email. Check SMTP settings and try again.',
+        503,
+        'VERIFICATION_EMAIL_FAILED'
+      );
+    }
 
     // Assign default role (buyer) - use cache to avoid DB hit on every registration
     let defaultRole = roleCache.get<Role>('buyer');

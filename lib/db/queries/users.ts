@@ -67,6 +67,13 @@ export async function createUserWithVerificationToken(
 }
 
 /**
+ * Permanently remove a user (cascades to roles, tokens, etc. per schema).
+ */
+export async function deleteUserById(userId: string): Promise<void> {
+  await query('DELETE FROM login.users WHERE id = $1', [userId]);
+}
+
+/**
  * Get user by ID
  */
 export async function getUserById(userId: string): Promise<User | null> {
