@@ -26,8 +26,10 @@ async function handler(request: NextRequest) {
       }
     }
 
+    // Same message whether we sent mail or not (avoid email-enumeration). Not an error — HTTP 200.
     return createSuccessResponse({
-      message: 'If an account exists with this email, a verification code has been sent.',
+      message:
+        'Check your email for a verification code. If nothing arrives, confirm the address or try again in a few minutes.',
     });
   } catch (error) {
     return createErrorResponse(error);

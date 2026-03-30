@@ -68,7 +68,8 @@ async function handler(request: NextRequest) {
     return createSuccessResponse(
       {
         emailVerificationRequired: true,
-        message: 'Please verify your email to sign in.',
+        message:
+          'We sent a 6-digit verification code to your email. Enter it on the verify screen, then you can sign in.',
         user: {
           id: user.id,
           email: user.email,
