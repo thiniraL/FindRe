@@ -200,6 +200,29 @@ export async function setEmailVerificationToken(
 }
 
 /**
+ * Validate password reset code without consuming it (for verify-reset-otp step).
+ */
+export async function validatePasswordResetCode(
+  email: string,
+  code: string
+): Promise<User> {
+  const normalizedEmail = email.toLowerCase().trim();
+  const result = await query<User>(
+    `SELECT ${USER_COLUMNS} FROM login.users
+     WHERE email = $1
+       AND password_reset_token = $2
+       AND password_reset_expires >= $3`,
+    [normalizedEmail, code, new Date().toISOString()]
+  );
+
+  if (!result.rows[0]) {
+    throw new AppError('Invalid or expired reset code', 400, 'INVALID_RESET_TOKEN');
+  }
+
+  return result.rows[0];
+}
+
+/**
  * Reset password using email and 6-digit code
  */
 export async function resetPassword(

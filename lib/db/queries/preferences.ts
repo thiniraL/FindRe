@@ -181,6 +181,8 @@ type PreferencesForFeedRow = {
   /** Pre-computed Typesense _eval sort string; used by feed when present */
   typesense_feed_sort_by: string | null;
   is_ready_for_recommendations: boolean;
+  /** Set when analyze_user_preferences last completed; feed clients use as preferencesGeneration */
+  last_analyzed_at: string | null;
 };
 
 export async function getPreferencesForFeed(
@@ -203,7 +205,8 @@ export async function getPreferencesForFeed(
       preferred_feature_ids,
       preference_counters,
       typesense_feed_sort_by,
-      is_ready_for_recommendations
+      is_ready_for_recommendations,
+      last_analyzed_at
     FROM user_activity.USER_PREFERENCES
     WHERE session_id = $1
     `,
@@ -213,3 +216,15 @@ export async function getPreferencesForFeed(
   return res.rows[0] || null;
 }
 
+/** Indexed lookup; use in parallel with Typesense when feed prefs are cached so meta stays fresh after DB trigger analysis. */
+export async function getLastAnalyzedAtForSession(sessionId: string): Promise<string | null> {
+  const res = await query<{ last_analyzed_at: string | null }>(
+    `
+    SELECT last_analyzed_at
+    FROM user_activity.USER_PREFERENCES
+    WHERE session_id = $1
+    `,
+    [sessionId]
+  );
+  return res.rows[0]?.last_analyzed_at ?? null;
+}

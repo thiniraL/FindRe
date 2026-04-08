@@ -73,7 +73,8 @@ export function createPaginatedResponse<T>(
   data: T[],
   page: number,
   limit: number,
-  total?: number | null
+  total?: number | null,
+  meta?: Record<string, unknown>
 ): NextResponse {
   const pagination: { page: number; limit: number; total?: number; totalPages?: number } = {
     page,
@@ -83,10 +84,15 @@ export function createPaginatedResponse<T>(
     pagination.total = total;
     pagination.totalPages = Math.ceil(total / limit);
   }
-  return NextResponse.json({
-    data,
-    pagination,
-  });
+  const body: {
+    data: T[];
+    pagination: typeof pagination;
+    meta?: Record<string, unknown>;
+  } = { data, pagination };
+  if (meta && Object.keys(meta).length > 0) {
+    body.meta = meta;
+  }
+  return NextResponse.json(body);
 }
 
 

@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 import { z } from 'zod';
 import { AppError, createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors';
 import { validateQuery } from '@/lib/security/validation';
-import { getPreferencesForFeed } from '@/lib/db/queries/preferences';
+import { getLastAnalyzedAtForSession, getPreferencesForFeed } from '@/lib/db/queries/preferences';
 import { feedPrefsCache } from '@/lib/cache';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
 import { typesenseSearch } from '@/lib/search/typesense';
@@ -296,11 +296,13 @@ export async function GET(request: NextRequest) {
     const lang = getLanguageCode(request);
 
     const feedPrefsKey = `feed_prefs:${sessionId}`;
-    let prefs = feedPrefsCache.get<Awaited<ReturnType<typeof getPreferencesForFeed>>>(feedPrefsKey);
+    const cachedPrefs = feedPrefsCache.get<Awaited<ReturnType<typeof getPreferencesForFeed>>>(feedPrefsKey);
+    let prefs = cachedPrefs ?? null;
     if (!prefs) {
       prefs = await getPreferencesForFeed(sessionId);
       if (prefs) feedPrefsCache.set(feedPrefsKey, prefs);
     }
+    const prefsFromCache = !!cachedPrefs;
     const counters =
       prefs?.is_ready_for_recommendations && prefs
         ? ((prefs.preference_counters ?? null) as PreferenceCounters | null)
@@ -314,15 +316,35 @@ export async function GET(request: NextRequest) {
         : buildSortByEval(counters);
     const sortBy = sortByEval ?? 'is_featured:desc,featured_rank:asc,updated_at:desc';
 
-    const resp = await typesenseSearch<TypesensePropertyDoc>({
-      collection: 'properties',
-      q: '*',
-      queryBy: PROPERTIES_QUERY_BY,
-      filterBy,
-      sortBy,
-      page,
-      perPage,
-    });
+    const [resp, freshLastAnalyzed] = prefsFromCache
+      ? await Promise.all([
+          typesenseSearch<TypesensePropertyDoc>({
+            collection: 'properties',
+            q: '*',
+            queryBy: PROPERTIES_QUERY_BY,
+            filterBy,
+            sortBy,
+            page,
+            perPage,
+          }),
+          getLastAnalyzedAtForSession(sessionId),
+        ])
+      : [
+          await typesenseSearch<TypesensePropertyDoc>({
+            collection: 'properties',
+            q: '*',
+            queryBy: PROPERTIES_QUERY_BY,
+            filterBy,
+            sortBy,
+            page,
+            perPage,
+          }),
+          null as string | null,
+        ];
+
+    if (prefsFromCache && prefs && freshLastAnalyzed !== prefs.last_analyzed_at) {
+      feedPrefsCache.delete(feedPrefsKey);
+    }
 
     // When we used _eval, Typesense already ranked by preferences; no app rerank. Otherwise keep order.
     const hits = sortByEval ? resp.hits : rerankHitsByPreferences(resp.hits, counters);
@@ -339,7 +361,12 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    return createPaginatedResponse(items, page, perPage, resp.found);
+    const preferencesGeneration = prefsFromCache
+      ? freshLastAnalyzed
+      : (prefs?.last_analyzed_at ?? null);
+    return createPaginatedResponse(items, page, perPage, resp.found, {
+      preferencesGeneration,
+    });
   } catch (error) {
     return createErrorResponse(error);
   }
