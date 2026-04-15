@@ -51,7 +51,8 @@ npm run dev
   - `SMTP_USER` - SMTP username
   - `SMTP_PASSWORD` - SMTP password (for Gmail use an [App Password](https://support.google.com/accounts/answer/185833))
   - `FROM_EMAIL` - Sender address
-  - `FRONTEND_URL` - Base URL for link-based emails (e.g. `https://yourdomain.com`)
+- `FRONTEND_URL` - Base URL for link-based emails (e.g. `https://yourdomain.com`)
+- `GOOGLE_CLIENT_ID` - Google OAuth client ID used by `POST /api/auth/google` (use comma-separated IDs for multi-platform clients)
 
 If SMTP env vars are missing or wrong, the API still returns success but emails are not sent; check server logs for `Email send failed` and the error details.
 

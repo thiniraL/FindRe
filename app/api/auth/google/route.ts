@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { OAuth2Client } from 'google-auth-library';
+import { OAuth2Client, LoginTicket } from 'google-auth-library';
 import { validateBody } from '@/lib/security/validation';
 import { googleLoginSchema } from '@/lib/security/validation';
 import { createErrorResponse, createSuccessResponse, AppError } from '@/lib/utils/errors';
@@ -12,8 +12,30 @@ import { getUserIdentityByProvider, upsertUserIdentity } from '@/lib/db/queries/
 import * as crypto from 'crypto';
 import { User } from '@/lib/types/auth';
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_IDS = (process.env.GOOGLE_CLIENT_ID || '')
+  .split(',')
+  .map((id) => id.trim())
+  .filter(Boolean);
 const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
+
+function isGoogleTokenVerificationError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  // google-auth-library throws regular Error instances for verification failures.
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('wrong recipient') ||
+    message.includes('jwt audience invalid') ||
+    message.includes('token used too late') ||
+    message.includes('token used too early') ||
+    message.includes('token expired') ||
+    message.includes('invalid token signature') ||
+    message.includes('no pem found') ||
+    message.includes('failed to verify')
+  );
+}
 
 function getRefreshExpiry(): Date {
   const match = JWT_REFRESH_EXPIRY.match(/^(\d+)([smhd])$/);
@@ -42,16 +64,24 @@ function getRefreshExpiry(): Date {
 
 async function handler(request: NextRequest) {
   try {
-    if (!GOOGLE_CLIENT_ID) {
+    if (GOOGLE_CLIENT_IDS.length === 0) {
       throw new AppError('Google client ID is not configured', 500, 'GOOGLE_CLIENT_ID_MISSING');
     }
 
     const body = await validateBody(request, googleLoginSchema);
-    const client = new OAuth2Client(GOOGLE_CLIENT_ID);
-    const ticket = await client.verifyIdToken({
-      idToken: body.idToken,
-      audience: GOOGLE_CLIENT_ID,
-    });
+    const client = new OAuth2Client();
+    let ticket: LoginTicket;
+    try {
+      ticket = await client.verifyIdToken({
+        idToken: body.idToken,
+        audience: GOOGLE_CLIENT_IDS,
+      });
+    } catch (error) {
+      if (isGoogleTokenVerificationError(error)) {
+        throw new AppError('Invalid Google token', 401, 'GOOGLE_TOKEN_INVALID');
+      }
+      throw error;
+    }
 
     const payload = ticket.getPayload();
     if (!payload?.email) {
