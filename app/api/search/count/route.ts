@@ -8,8 +8,8 @@ import {
 } from '@/lib/security/validation';
 import type { SearchFilterState } from '@/lib/search/buildFilterQuery';
 import {
-  parseNaturalLanguageQuery,
-  mergeNaturalLanguageIntoState,
+  applyNaturalLanguageQuery,
+  resolveNaturalLanguageSearchMode,
 } from '@/lib/search/naturalLanguageQuery';
 import {
   getPurposeLabel,
@@ -100,15 +100,14 @@ export async function GET(request: NextRequest) {
     };
 
     const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
-    const qValue = parsed.q?.trim() || '';
-    const willUseNl =
-      !!nlModelId &&
-      !!qValue &&
-      parsed.nl_query !== false;
+    const { qValue, willUseNl } = resolveNaturalLanguageSearchMode(
+      parsed.q,
+      nlModelId,
+      parsed.nl_query === false
+    );
 
-    if (!willUseNl && qValue) {
-      const nlMapped = parseNaturalLanguageQuery(parsed.q!);
-      mergeNaturalLanguageIntoState(filterState, nlMapped);
+    if (qValue) {
+      applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
     }
     if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';
@@ -156,15 +155,14 @@ export async function POST(request: NextRequest) {
     };
 
     const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
-    const qValue = body.q?.trim() || '';
-    const willUseNl =
-      !!nlModelId &&
-      !!qValue &&
-      body.nl_query !== false;
+    const { qValue, willUseNl } = resolveNaturalLanguageSearchMode(
+      body.q,
+      nlModelId,
+      body.nl_query === false
+    );
 
-    if (!willUseNl && qValue) {
-      const nlMapped = parseNaturalLanguageQuery(body.q!);
-      mergeNaturalLanguageIntoState(filterState, nlMapped);
+    if (qValue) {
+      applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
     }
     if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';

@@ -38,6 +38,10 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'purpose_key', type: 'string', facet: true, optional: true },
     { name: 'property_type_id', type: 'int32', facet: true, optional: true },
     { name: 'property_type_ids', type: 'int32[]', facet: true, optional: true },
+    { name: 'property_type_key', type: 'string', facet: true, optional: true },
+    { name: 'property_type_keys', type: 'string[]', facet: true, optional: true },
+    { name: 'property_type_en', type: 'string', optional: true },
+    { name: 'property_type_names_en', type: 'string[]', optional: true },
     { name: 'main_property_type_ids', type: 'int32[]', facet: true, optional: true },
     { name: 'price', type: 'float', facet: true, optional: true },
     { name: 'currency_id', type: 'int32', facet: true, optional: true },
@@ -214,6 +218,10 @@ type PropertyDoc = {
   purpose_key: string | null;
   property_type_id: number | null;
   property_type_ids: number[] | null;
+  property_type_key: string | null;
+  property_type_keys: string[] | null;
+  property_type_en: string | null;
+  property_type_names_en: string[] | null;
   main_property_type_ids: number[] | null;
   price: number | null;
   currency_id: number | null;
@@ -376,6 +384,10 @@ serve(async (req) => {
           purpose_key: string | null;
           property_type_id: number | null;
           property_type_ids: number[] | null;
+          property_type_key: string | null;
+          property_type_keys: string[] | null;
+          property_type_en: string | null;
+          property_type_names_en: string[] | null;
           main_property_type_ids: number[] | null;
           price: number | null;
           currency_id: number | null;
@@ -424,6 +436,10 @@ serve(async (req) => {
               (p.property_type_ids)[1] AS property_type_id,
               p.property_type_ids,
               p.main_property_type_ids,
+              pt_primary.type_key AS property_type_key,
+              pt_primary.name_translations->>'en' AS property_type_en,
+              pt_all.property_type_keys,
+              pt_all.property_type_names_en,
               p.price,
               p.currency_id,
               pd.bedrooms,
@@ -466,6 +482,15 @@ serve(async (req) => {
             LEFT JOIN property.PURPOSES pur ON pur.purpose_id = p.purpose_id
             LEFT JOIN business.AGENTS a ON a.agent_id = p.agent_id
             LEFT JOIN business.AGENCIES ag ON ag.agency_id = a.agency_id
+            LEFT JOIN property.PROPERTY_TYPES pt_primary
+              ON pt_primary.type_id = (p.property_type_ids)[1]
+            LEFT JOIN LATERAL (
+              SELECT
+                ARRAY_AGG(pt.type_key ORDER BY pt.type_id) AS property_type_keys,
+                ARRAY_AGG(COALESCE(pt.name_translations->>'en', pt.type_key) ORDER BY pt.type_id) AS property_type_names_en
+              FROM unnest(COALESCE(p.property_type_ids, '{}')) AS tid
+              JOIN property.PROPERTY_TYPES pt ON pt.type_id = tid
+            ) pt_all ON TRUE
           )
           SELECT
             b.*,
@@ -590,6 +615,10 @@ serve(async (req) => {
               purpose_key: r.purpose_key,
               property_type_id: r.property_type_id,
               property_type_ids: r.property_type_ids ?? null,
+              property_type_key: r.property_type_key ?? null,
+              property_type_keys: r.property_type_keys ?? null,
+              property_type_en: r.property_type_en ?? null,
+              property_type_names_en: r.property_type_names_en ?? null,
               main_property_type_ids: r.main_property_type_ids ?? null,
               price: r.price !== null ? Number(r.price) : null,
               currency_id: r.currency_id,

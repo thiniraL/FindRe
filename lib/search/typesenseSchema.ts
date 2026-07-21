@@ -49,6 +49,10 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'purpose_key', type: 'string', facet: true, optional: true },
     { name: 'property_type_id', type: 'int32', facet: true, optional: true },
     { name: 'property_type_ids', type: 'int32[]', facet: true, optional: true },
+    { name: 'property_type_key', type: 'string', facet: true, optional: true },
+    { name: 'property_type_keys', type: 'string[]', facet: true, optional: true },
+    { name: 'property_type_en', type: 'string', optional: true },
+    { name: 'property_type_names_en', type: 'string[]', optional: true },
     { name: 'main_property_type_ids', type: 'int32[]', facet: true, optional: true },
     { name: 'price', type: 'float', facet: true, optional: true },
     { name: 'currency_id', type: 'int32', facet: true, optional: true },
@@ -102,5 +106,5 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
 };
 
 export const PROPERTIES_QUERY_BY =
-  'title_en,title_ar,address,city_en,area_en,community_en,agent_name,agency_name';
+  'title_en,title_ar,address,city_en,area_en,community_en,property_type_en,property_type_key,property_type_names_en,agent_name,agency_name';
 

@@ -98,7 +98,8 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
     parts.push(`main_property_type_ids:=[${state.mainPropertyTypeIds.join(',')}]`);
   }
   if (state.propertyTypeIds?.length) {
-    parts.push(`property_type_id:=[${state.propertyTypeIds.join(',')}]`);
+    const ids = state.propertyTypeIds.join(',');
+    parts.push(`(property_type_id:=[${ids}] || property_type_ids:=[${ids}])`);
   }
   const bedroomParts = buildCountFilterParts(state.bedrooms, 'bedrooms');
   if (bedroomParts.length === 1) parts.push(bedroomParts[0]);

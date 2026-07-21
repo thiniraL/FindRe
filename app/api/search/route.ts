@@ -11,8 +11,9 @@ import {
 } from '@/lib/search/buildFilterQuery';
 // GET/POST keys match SEARCH_FILTER_CONFIGS filter id (see lib/search/filterConfigToSearchKeys.ts; price→priceMin/priceMax, area→areaMin/areaMax; area always sqm)
 import {
-  parseNaturalLanguageQuery,
-  mergeNaturalLanguageIntoState,
+  applyNaturalLanguageQuery,
+  getTypesenseNlQuery,
+  resolveNaturalLanguageSearchMode,
   PURPOSE_WORDS_SET,
   SEARCH_STOPWORDS,
 } from '@/lib/search/naturalLanguageQuery';
@@ -27,6 +28,7 @@ export const dynamic = 'force-dynamic';
  *     auto nl_query=true → Typesense with nl_model_id (same as Postman NL search).
  *   Otherwise: rule-based NL (parseNaturalLanguageQuery + mergeNaturalLanguageIntoState)
  *     → buildSearchQuery + buildFilterBy → Typesense.
+ *   When Typesense NL is on, rule-based still merges beds/baths/price/property type into filter_by.
  */
 
 const DEFAULT_COUNTRY_ID = 1;
@@ -179,15 +181,14 @@ export async function GET(request: NextRequest) {
 
     // Non-empty q → Typesense NL (nl_query=true). Explicit nl_query=false opts out.
     const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
-    const qValue = parsed.q?.trim() || '';
-    const willUseNl =
-      !!nlModelId &&
-      !!qValue &&
-      parsed.nl_query !== false;
+    const { qValue, willUseNl } = resolveNaturalLanguageSearchMode(
+      parsed.q,
+      nlModelId,
+      parsed.nl_query === false
+    );
 
-    if (!willUseNl && qValue) {
-      const nlMapped = parseNaturalLanguageQuery(parsed.q!);
-      mergeNaturalLanguageIntoState(filterState, nlMapped);
+    if (qValue) {
+      applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
     }
 
     // Default purpose only for non-NL search. NL lets the model set purpose_key (e.g. for_rent).
@@ -237,9 +238,10 @@ async function runSearch(
   if (filterState.keyword) filterState.keyword = stripStopwords(filterState.keyword);
 
   const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
-  // Match Postman NL: pass raw q + nl_model_id; let LLM own filter/sort from q.
-  // Keep only explicit UI filters (and country scope) so we don't override LLM purpose/sort.
-  const q = useNl ? (nlOptions!.rawQ?.trim() || '*') : buildSearchQuery(filterState);
+  // Structured tokens (beds, type, price) are in filter_by; strip them from NL q to avoid double-filtering.
+  const q = useNl
+    ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '')
+    : buildSearchQuery(filterState);
   const filterBy = buildFilterBy(filterState);
 
   const resp = await typesenseSearch<TypesensePropertyDoc>({
@@ -340,15 +342,14 @@ export async function POST(request: NextRequest) {
     };
 
     const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
-    const qValue = body.q?.trim() || '';
-    const willUseNl =
-      !!nlModelId &&
-      !!qValue &&
-      body.nl_query !== false;
+    const { qValue, willUseNl } = resolveNaturalLanguageSearchMode(
+      body.q,
+      nlModelId,
+      body.nl_query === false
+    );
 
-    if (!willUseNl && qValue) {
-      const nlMapped = parseNaturalLanguageQuery(body.q!);
-      mergeNaturalLanguageIntoState(filterState, nlMapped);
+    if (qValue) {
+      applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
     }
     if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';

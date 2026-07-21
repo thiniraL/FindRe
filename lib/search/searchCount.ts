@@ -6,7 +6,7 @@ import type { SearchFilterState } from './buildFilterQuery';
 import { buildFilterBy, buildSearchQuery } from './buildFilterQuery';
 import { PROPERTIES_QUERY_BY } from './typesenseSchema';
 import { typesenseSearch } from './typesense';
-import { PURPOSE_WORDS_SET, SEARCH_STOPWORDS } from './naturalLanguageQuery';
+import { PURPOSE_WORDS_SET, SEARCH_STOPWORDS, getTypesenseNlQuery } from './naturalLanguageQuery';
 
 const PURPOSE_KEY_TO_LABEL: Record<string, string> = {
   for_sale: 'For Sale',
@@ -47,7 +47,7 @@ export async function runSearchCount(
   if (state.keyword) state.keyword = stripStopwords(state.keyword);
 
   const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
-  const q = useNl ? (nlOptions!.rawQ?.trim() || '*') : buildSearchQuery(state);
+  const q = useNl ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '') : buildSearchQuery(state);
   const filterBy = buildFilterBy(state);
 
   const resp = await typesenseSearch<{ property_id: string }>({
