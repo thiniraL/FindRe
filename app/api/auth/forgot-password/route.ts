@@ -18,7 +18,7 @@ async function handler(request: NextRequest) {
     if (user) {
       // Generate 6-digit reset code
       const resetCode = generateVerificationOtp();
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
       console.info('Password reset code generated', { userId: user.id, email: user.email });
       await setPasswordResetToken(user.email, resetCode, expiresAt);

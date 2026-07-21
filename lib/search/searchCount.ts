@@ -46,8 +46,8 @@ export async function runSearchCount(
   if (state.location) state.location = stripStopwords(state.location);
   if (state.keyword) state.keyword = stripStopwords(state.keyword);
 
-  const useNl = nlOptions?.useNlQuery && nlOptions?.nlModelId;
-  const q = useNl ? (nlOptions.rawQ?.trim() || '*') : buildSearchQuery(state);
+  const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
+  const q = useNl ? (nlOptions!.rawQ?.trim() || '*') : buildSearchQuery(state);
   const filterBy = buildFilterBy(state);
 
   const resp = await typesenseSearch<{ property_id: string }>({
@@ -55,7 +55,7 @@ export async function runSearchCount(
     q,
     queryBy: PROPERTIES_QUERY_BY,
     filterBy: filterBy ?? undefined,
-    sortBy: 'updated_at:desc',
+    sortBy: useNl ? undefined : 'updated_at:desc',
     page: 1,
     perPage: 0,
     ...(useNl && {

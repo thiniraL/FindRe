@@ -98,6 +98,9 @@ export async function typesenseSearch<TDoc>(options: {
   if (options.nlQuery === true && options.nlModelId) {
     params.set('nl_query', 'true');
     params.set('nl_model_id', options.nlModelId);
+    if (process.env.TYPESENSE_NL_QUERY_DEBUG === 'true') {
+      params.set('nl_query_debug', 'true');
+    }
   }
 
   return await typesenseFetch<TypesenseSearchResponse<TDoc>>(

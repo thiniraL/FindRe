@@ -45,10 +45,10 @@ export function buildPasswordResetEmail(resetUrl: string): EmailContent {
 export function buildPasswordResetEmailWithOtp(otp: string): EmailContent {
   return {
     subject: 'Reset your password',
-    text: `Your password reset code is: ${otp}\n\nThis code expires in 1 hour.\n\nIf you did not request a password reset, you can ignore this email.`,
+    text: `Your password reset code is: ${otp}\n\nThis code expires in 15 minutes.\n\nIf you did not request a password reset, you can ignore this email.`,
     html: `
       <p>Your password reset code is: <strong>${otp}</strong></p>
-      <p>This code expires in 1 hour.</p>
+      <p>This code expires in 15 minutes.</p>
       <p>If you did not request a password reset, you can ignore this email.</p>
     `.trim(),
   };

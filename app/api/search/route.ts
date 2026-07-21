@@ -23,7 +23,8 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Search pipeline:
- *   When nl_query=true: raw q + explicit filters → Typesense with nl_query/nl_model_id (LLM parses q).
+ *   When q is non-empty and TYPESENSE_NL_MODEL_ID is set:
+ *     auto nl_query=true → Typesense with nl_model_id (same as Postman NL search).
  *   Otherwise: rule-based NL (parseNaturalLanguageQuery + mergeNaturalLanguageIntoState)
  *     → buildSearchQuery + buildFilterBy → Typesense.
  */
@@ -176,27 +177,30 @@ export async function GET(request: NextRequest) {
       featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
 
-    // When nl_query=true we use Typesense NL (LLM); skip rule-based parse of q. Otherwise merge q into filter state.
-    // If nl_query is not sent but q has a value, treat as nl_query=true (use Typesense NL when model is set).
-    const useTypesenseNl =
-      parsed.nl_query === true || (parsed.nl_query === undefined && !!parsed.q?.trim());
-    if (!useTypesenseNl && parsed.q?.trim()) {
-      const nlMapped = parseNaturalLanguageQuery(parsed.q);
+    // Non-empty q → Typesense NL (nl_query=true). Explicit nl_query=false opts out.
+    const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
+    const qValue = parsed.q?.trim() || '';
+    const willUseNl =
+      !!nlModelId &&
+      !!qValue &&
+      parsed.nl_query !== false;
+
+    if (!willUseNl && qValue) {
+      const nlMapped = parseNaturalLanguageQuery(parsed.q!);
       mergeNaturalLanguageIntoState(filterState, nlMapped);
     }
 
-    // If purpose still empty after NL merge (no param, no purpose word in q), default to for_sale
-    if (!filterState.purpose?.trim()) {
+    // Default purpose only for non-NL search. NL lets the model set purpose_key (e.g. for_rent).
+    if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';
     }
 
     const page = parsed.page ?? DEFAULT_PAGE;
     const perPage = parsed.limit ?? DEFAULT_LIMIT;
 
-    const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
     const { items, found } = await runSearch(filterState, page, perPage, request, {
-      useNlQuery: useTypesenseNl && !!nlModelId,
-      rawQ: parsed.q?.trim() || undefined,
+      useNlQuery: willUseNl,
+      rawQ: qValue || undefined,
       nlModelId,
     });
     return createPaginatedResponse(items, page, perPage, found);
@@ -232,8 +236,10 @@ async function runSearch(
   if (filterState.location) filterState.location = stripStopwords(filterState.location);
   if (filterState.keyword) filterState.keyword = stripStopwords(filterState.keyword);
 
-  const useNl = nlOptions?.useNlQuery && nlOptions?.nlModelId;
-  const q = useNl ? (nlOptions.rawQ?.trim() || '*') : buildSearchQuery(filterState);
+  const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
+  // Match Postman NL: pass raw q + nl_model_id; let LLM own filter/sort from q.
+  // Keep only explicit UI filters (and country scope) so we don't override LLM purpose/sort.
+  const q = useNl ? (nlOptions!.rawQ?.trim() || '*') : buildSearchQuery(filterState);
   const filterBy = buildFilterBy(filterState);
 
   const resp = await typesenseSearch<TypesensePropertyDoc>({
@@ -241,7 +247,8 @@ async function runSearch(
     q,
     queryBy: PROPERTIES_QUERY_BY,
     filterBy: filterBy ?? undefined,
-    sortBy: 'updated_at:desc',
+    // When NL is on, omit sort_by so LLM can apply "cheapest first" etc.
+    sortBy: useNl ? undefined : 'updated_at:desc',
     page,
     perPage,
     ...(useNl && {
@@ -332,23 +339,27 @@ export async function POST(request: NextRequest) {
       featureIds: body.featureIds?.length ? body.featureIds : undefined,
     };
 
-    const useTypesenseNl =
-      body.nl_query === true || (body.nl_query === undefined && !!body.q?.trim());
-    if (!useTypesenseNl && body.q?.trim()) {
-      const nlMapped = parseNaturalLanguageQuery(body.q);
+    const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
+    const qValue = body.q?.trim() || '';
+    const willUseNl =
+      !!nlModelId &&
+      !!qValue &&
+      body.nl_query !== false;
+
+    if (!willUseNl && qValue) {
+      const nlMapped = parseNaturalLanguageQuery(body.q!);
       mergeNaturalLanguageIntoState(filterState, nlMapped);
     }
-    if (!filterState.purpose?.trim()) {
+    if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';
     }
 
     const page = body.page ?? DEFAULT_PAGE;
     const perPage = body.limit ?? DEFAULT_LIMIT;
 
-    const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
     const { items, found } = await runSearch(filterState, page, perPage, request, {
-      useNlQuery: useTypesenseNl && !!nlModelId,
-      rawQ: body.q?.trim() || undefined,
+      useNlQuery: willUseNl,
+      rawQ: qValue || undefined,
       nlModelId,
     });
     return createPaginatedResponse(items, page, perPage, found);

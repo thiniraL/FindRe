@@ -99,23 +99,27 @@ export async function GET(request: NextRequest) {
       featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
 
-    const useTypesenseNl =
-      parsed.nl_query === true || (parsed.nl_query === undefined && !!parsed.q?.trim());
-    if (!useTypesenseNl && parsed.q?.trim()) {
-      const nlMapped = parseNaturalLanguageQuery(parsed.q);
+    const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
+    const qValue = parsed.q?.trim() || '';
+    const willUseNl =
+      !!nlModelId &&
+      !!qValue &&
+      parsed.nl_query !== false;
+
+    if (!willUseNl && qValue) {
+      const nlMapped = parseNaturalLanguageQuery(parsed.q!);
       mergeNaturalLanguageIntoState(filterState, nlMapped);
     }
-    if (!filterState.purpose?.trim()) {
+    if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';
     }
 
-    const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
     const totalCount = await runSearchCount(filterState, {
-      useNlQuery: useTypesenseNl && !!nlModelId,
-      rawQ: parsed.q?.trim() || undefined,
+      useNlQuery: willUseNl,
+      rawQ: qValue || undefined,
       nlModelId,
     });
-    const purposeLabel = getPurposeLabel(filterState.purpose);
+    const purposeLabel = getPurposeLabel(filterState.purpose || 'for_sale');
     const resultButtonLabel = buildResultButtonLabel(purposeLabel, totalCount);
 
     return createSuccessResponse({ totalCount, resultButtonLabel });
@@ -151,23 +155,27 @@ export async function POST(request: NextRequest) {
       featureIds: body.featureIds?.length ? body.featureIds : undefined,
     };
 
-    const useTypesenseNl =
-      body.nl_query === true || (body.nl_query === undefined && !!body.q?.trim());
-    if (!useTypesenseNl && body.q?.trim()) {
-      const nlMapped = parseNaturalLanguageQuery(body.q);
+    const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
+    const qValue = body.q?.trim() || '';
+    const willUseNl =
+      !!nlModelId &&
+      !!qValue &&
+      body.nl_query !== false;
+
+    if (!willUseNl && qValue) {
+      const nlMapped = parseNaturalLanguageQuery(body.q!);
       mergeNaturalLanguageIntoState(filterState, nlMapped);
     }
-    if (!filterState.purpose?.trim()) {
+    if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';
     }
 
-    const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
     const totalCount = await runSearchCount(filterState, {
-      useNlQuery: useTypesenseNl && !!nlModelId,
-      rawQ: body.q?.trim() || undefined,
+      useNlQuery: willUseNl,
+      rawQ: qValue || undefined,
       nlModelId,
     });
-    const purposeLabel = getPurposeLabel(filterState.purpose);
+    const purposeLabel = getPurposeLabel(filterState.purpose || 'for_sale');
     const resultButtonLabel = buildResultButtonLabel(purposeLabel, totalCount);
 
     return createSuccessResponse({ totalCount, resultButtonLabel });
