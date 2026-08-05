@@ -3,10 +3,12 @@ import { createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors
 import { validateQuery, validateBody } from '@/lib/security/validation';
 import { searchQuerySchema, searchBodySchema, agentIdFilterEntrySchema } from '@/lib/security/validation';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
-import { typesenseSearch } from '@/lib/search/typesense';
 import {
   buildFilterBy,
   buildSearchQuery,
+  buildKeywordOrQueries,
+  needsKeywordOrSearch,
+  normalizeKeywords,
   type SearchFilterState,
 } from '@/lib/search/buildFilterQuery';
 // GET/POST keys match SEARCH_FILTER_CONFIGS filter id (see lib/search/filterConfigToSearchKeys.ts; price→priceMin/priceMax, area→areaMin/areaMax; area always sqm)
@@ -19,6 +21,7 @@ import {
 } from '@/lib/search/naturalLanguageQuery';
 import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
 import { verifyAccessToken } from '@/lib/auth/jwt';
+import { typesenseSearch, typesenseMultiSearchUnion } from '@/lib/search/typesense';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,18 +100,6 @@ function parseBedroomsBathsList(value: string | undefined): (number | string)[] 
   return out.length ? out : undefined;
 }
 
-/** Normalize keyword to a single search string: array -> join with space; string (comma-separated ok) -> trimmed. */
-function normalizeKeyword(value: string | string[] | undefined): string | undefined {
-  if (value == null) return undefined;
-  if (Array.isArray(value)) {
-    const joined = value.map((s) => String(s).trim()).filter(Boolean).join(' ');
-    return joined.length ? joined : undefined;
-  }
-  const s = String(value).trim();
-  if (!s) return undefined;
-  return s.includes(',') ? s.split(',').map((x) => x.trim()).filter(Boolean).join(' ') : s;
-}
-
 /** Parse agentIds from GET query (JSON string). Expects [{"id": number, "type": "agent"|"agency"}, ...]. */
 function parseAgentIdsFromQuery(value: string | undefined): { id: number; type: 'agency' | 'agent' }[] | undefined {
   if (!value?.trim()) return undefined;
@@ -174,7 +165,8 @@ export async function GET(request: NextRequest) {
       priceMax: parsed.priceMax,
       areaMin: parsed.areaMin,
       areaMax: parsed.areaMax,
-      keyword: normalizeKeyword(parsed.keyword),
+      keyword: undefined,
+      keywords: normalizeKeywords(parsed.keyword),
       agentIds: parseAgentIdsFromQuery(parsed.agentIds),
       featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
@@ -236,13 +228,37 @@ async function runSearch(
   const lang = getLanguageCode(request);
   if (filterState.location) filterState.location = stripStopwords(filterState.location);
   if (filterState.keyword) filterState.keyword = stripStopwords(filterState.keyword);
+  if (filterState.keywords?.length) {
+    filterState.keywords = filterState.keywords
+      .map((k) => stripStopwords(k) || '')
+      .filter(Boolean);
+    if (!filterState.keywords.length) filterState.keywords = undefined;
+  }
 
   const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
+  const filterBy = buildFilterBy(filterState);
+
+  // Multiple keyword chips → OR via multi-search union (skip NL for this path)
+  if (!useNl && needsKeywordOrSearch(filterState)) {
+    const qs = buildKeywordOrQueries(filterState);
+    const resp = await typesenseMultiSearchUnion<TypesensePropertyDoc>(
+      qs.map((q) => ({
+        collection: 'properties',
+        q,
+        queryBy: PROPERTIES_QUERY_BY,
+        filterBy: filterBy ?? undefined,
+        sortBy: 'updated_at:desc',
+        page,
+        perPage,
+      }))
+    );
+    return mapHitsToItems(resp, lang, request);
+  }
+
   // NL mode: send the original natural-language sentence to Typesense (nl_query + nl_model_id).
   const q = useNl
     ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '')
     : buildSearchQuery(filterState);
-  const filterBy = buildFilterBy(filterState);
 
   const resp = await typesenseSearch<TypesensePropertyDoc>({
     collection: 'properties',
@@ -259,6 +275,14 @@ async function runSearch(
     }),
   });
 
+  return mapHitsToItems(resp, lang, request);
+}
+
+async function mapHitsToItems(
+  resp: { hits: Array<{ document: TypesensePropertyDoc }>; found: number },
+  lang: 'en' | 'ar',
+  request: NextRequest
+): Promise<{ items: Array<{ property: object }>; found: number }> {
   const sessionId = getSessionId(request);
   const userId = tryGetUserIdFromAuthHeader(request);
   const propertyIds = resp.hits.map((h) => Number(h.document.property_id));
@@ -336,7 +360,8 @@ export async function POST(request: NextRequest) {
       priceMax: body.price?.[1],
       areaMin: body.area?.[0],
       areaMax: body.area?.[1],
-      keyword: normalizeKeyword(body.keyword),
+      keyword: undefined,
+      keywords: normalizeKeywords(body.keyword),
       agentIds: body.agentIds?.length ? body.agentIds : undefined,
       featureIds: body.featureIds?.length ? body.featureIds : undefined,
     };

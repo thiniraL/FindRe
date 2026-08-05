@@ -3,9 +3,14 @@
  */
 
 import type { SearchFilterState } from './buildFilterQuery';
-import { buildFilterBy, buildSearchQuery } from './buildFilterQuery';
+import {
+  buildFilterBy,
+  buildSearchQuery,
+  buildKeywordOrQueries,
+  needsKeywordOrSearch,
+} from './buildFilterQuery';
 import { PROPERTIES_QUERY_BY } from './typesenseSchema';
-import { typesenseSearch } from './typesense';
+import { typesenseSearch, typesenseMultiSearchUnion } from './typesense';
 import { PURPOSE_WORDS_SET, SEARCH_STOPWORDS, getTypesenseNlQuery } from './naturalLanguageQuery';
 
 const PURPOSE_KEY_TO_LABEL: Record<string, string> = {
@@ -45,10 +50,33 @@ export async function runSearchCount(
   const state = { ...filterState };
   if (state.location) state.location = stripStopwords(state.location);
   if (state.keyword) state.keyword = stripStopwords(state.keyword);
+  if (state.keywords?.length) {
+    state.keywords = state.keywords
+      .map((k) => stripStopwords(k) || '')
+      .filter(Boolean);
+    if (!state.keywords.length) state.keywords = undefined;
+  }
 
   const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
-  const q = useNl ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '') : buildSearchQuery(state);
   const filterBy = buildFilterBy(state);
+
+  if (!useNl && needsKeywordOrSearch(state)) {
+    const qs = buildKeywordOrQueries(state);
+    const resp = await typesenseMultiSearchUnion<{ property_id: string }>(
+      qs.map((q) => ({
+        collection: 'properties',
+        q,
+        queryBy: PROPERTIES_QUERY_BY,
+        filterBy: filterBy ?? undefined,
+        sortBy: 'updated_at:desc',
+        page: 1,
+        perPage: 0,
+      }))
+    );
+    return resp.found;
+  }
+
+  const q = useNl ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '') : buildSearchQuery(state);
 
   const resp = await typesenseSearch<{ property_id: string }>({
     collection: 'properties',

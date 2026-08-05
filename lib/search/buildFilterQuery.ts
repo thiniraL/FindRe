@@ -28,9 +28,14 @@ export type SearchFilterState = {
   /** Area range (always sqm) */
   areaMin?: number;
   areaMax?: number;
-  /** Keyword → appended to full-text q */
+  /** Free-text residual (e.g. from NL). Appended to q when no keywords[] chips. */
   keyword?: string;
-  /** Agent/agency filter: [{"id", "type": "agent"|"agency"}, ...]. Applied as agent_id and agency_id in Typesense. */
+  /**
+   * Keyword chip values (beach, golf, …). Multiple values are OR'd via multi-search.
+   * Single value is appended to full-text q.
+   */
+  keywords?: string[];
+  /** Agent/agency filter: [{"id", "type": "agent"|"agency"}, ...]. OR across agents and agencies in Typesense. */
   agentIds?: { id: number; type: 'agency' | 'agent' }[];
   /** Feature IDs from PROPERTY_DETAILS.feature_ids */
   featureIds?: number[];
@@ -120,10 +125,14 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
     parts.push(`area_sqm:<=${state.areaMax}`);
   }
   if (state.agentIds?.length) {
+    // Multi-select is OR: match any selected agent OR any selected agency
     const byAgent = state.agentIds.filter((e) => e.type === 'agent').map((e) => e.id);
     const byAgency = state.agentIds.filter((e) => e.type === 'agency').map((e) => e.id);
-    if (byAgent.length) parts.push(`agent_id:=[${byAgent.join(',')}]`);
-    if (byAgency.length) parts.push(`agency_id:=[${byAgency.join(',')}]`);
+    const agentOrAgency: string[] = [];
+    if (byAgent.length) agentOrAgency.push(`agent_id:=[${byAgent.join(',')}]`);
+    if (byAgency.length) agentOrAgency.push(`agency_id:=[${byAgency.join(',')}]`);
+    if (agentOrAgency.length === 1) parts.push(agentOrAgency[0]);
+    else if (agentOrAgency.length > 1) parts.push(`(${agentOrAgency.join(' || ')})`);
   }
   if (state.featureIds?.length) {
     parts.push(`feature_ids:=[${state.featureIds.join(',')}]`);
@@ -134,7 +143,53 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
 }
 
 /**
- * Build full-text q from location + keyword.
+ * Normalize API keyword (string | comma-separated | string[]) to a string array.
+ */
+export function normalizeKeywords(
+  value: string | string[] | undefined
+): string[] | undefined {
+  if (value == null) return undefined;
+  const list = Array.isArray(value)
+    ? value.map((s) => String(s).trim()).filter(Boolean)
+    : String(value)
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+  // Dedupe while preserving order
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const k of list) {
+    const key = k.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(k);
+  }
+  return unique.length ? unique : undefined;
+}
+
+/** True when multiple keyword chips should be OR'd (multi-search union). */
+export function needsKeywordOrSearch(state: SearchFilterState): boolean {
+  return (state.keywords?.length ?? 0) > 1;
+}
+
+/**
+ * One Typesense q per keyword for OR multi-search.
+ * Combines location with each keyword: (loc+kw1) OR (loc+kw2) …
+ */
+export function buildKeywordOrQueries(state: SearchFilterState): string[] {
+  const loc = state.location?.trim();
+  const kws = state.keywords ?? [];
+  return kws.map((kw) => {
+    const parts = [loc, kw].filter((p): p is string => !!p?.trim());
+    return parts.length ? parts.join(' ') : '*';
+  });
+}
+
+/**
+ * Build full-text q from location + keyword(s).
+ * - 0 keywords: location or '*'
+ * - 1 keyword: location + that keyword
+ * - 2+ keywords: location only (keywords OR'd separately via multi-search)
  * Returns '*' if nothing to search (Typesense wildcard).
  */
 export function buildSearchQuery(state: SearchFilterState): string {
@@ -142,9 +197,12 @@ export function buildSearchQuery(state: SearchFilterState): string {
   if (state.location?.trim()) {
     terms.push(state.location.trim());
   }
-  if (state.keyword?.trim()) {
+  if (state.keywords?.length === 1) {
+    terms.push(state.keywords[0]);
+  } else if (!state.keywords?.length && state.keyword?.trim()) {
     terms.push(state.keyword.trim());
   }
+  // Multiple keywords: do not AND into q — caller uses multi-search OR
   if (terms.length === 0) return '*';
   return terms.join(' ');
 }

@@ -7,6 +7,7 @@ import {
   agentIdFilterEntrySchema,
 } from '@/lib/security/validation';
 import type { SearchFilterState } from '@/lib/search/buildFilterQuery';
+import { normalizeKeywords } from '@/lib/search/buildFilterQuery';
 import {
   applyNaturalLanguageQuery,
   resolveNaturalLanguageSearchMode,
@@ -41,17 +42,6 @@ function parseBedroomsBathsList(value: string | undefined): (number | string)[] 
     }
   }
   return out.length ? out : undefined;
-}
-
-function normalizeKeyword(value: string | string[] | undefined): string | undefined {
-  if (value == null) return undefined;
-  if (Array.isArray(value)) {
-    const joined = value.map((s) => String(s).trim()).filter(Boolean).join(' ');
-    return joined.length ? joined : undefined;
-  }
-  const s = String(value).trim();
-  if (!s) return undefined;
-  return s.includes(',') ? s.split(',').map((x) => x.trim()).filter(Boolean).join(' ') : s;
 }
 
 function parseAgentIdsFromQuery(value: string | undefined): { id: number; type: 'agency' | 'agent' }[] | undefined {
@@ -94,7 +84,8 @@ export async function GET(request: NextRequest) {
       priceMax: parsed.priceMax,
       areaMin: parsed.areaMin,
       areaMax: parsed.areaMax,
-      keyword: normalizeKeyword(parsed.keyword),
+      keyword: undefined,
+      keywords: normalizeKeywords(parsed.keyword),
       agentIds: parseAgentIdsFromQuery(parsed.agentIds),
       featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
@@ -149,7 +140,8 @@ export async function POST(request: NextRequest) {
       priceMax: body.price?.[1],
       areaMin: body.area?.[0],
       areaMax: body.area?.[1],
-      keyword: normalizeKeyword(body.keyword),
+      keyword: undefined,
+      keywords: normalizeKeywords(body.keyword),
       agentIds: body.agentIds?.length ? body.agentIds : undefined,
       featureIds: body.featureIds?.length ? body.featureIds : undefined,
     };
