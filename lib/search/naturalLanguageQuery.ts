@@ -10,6 +10,8 @@ export type NaturalLanguageMapped = {
   location?: string;
   /** Residual or explicit keyword terms for full-text */
   keyword?: string;
+  /** Inferred from buy/rent/sale/lease words when present */
+  purpose?: 'for_sale' | 'for_rent';
   bedrooms?: number[];
   bathrooms?: number[];
   priceMin?: number;
@@ -150,15 +152,94 @@ const PURPOSE_WORD_MAP: Record<string, 'for_sale' | 'for_rent'> = {
 /** Set of purpose words/phrases (lowercase) for stripping from q; exported for use in search route. */
 export const PURPOSE_WORDS_SET = new Set<string>(Object.keys(PURPOSE_WORD_MAP));
 
+/** Longer purpose phrases first so "for rent" wins over "rent". */
+const PURPOSE_PHRASES = Object.keys(PURPOSE_WORD_MAP).sort(
+  (a, b) => b.length - a.length || a.localeCompare(b)
+);
+
 /** Generic intent words that rarely appear in property docs; stripping them avoids 0 results from Typesense. */
 export const SEARCH_STOPWORDS = new Set<string>(['properties', 'property', 'listings', 'listing', 'list', 'agent']);
 
-/** Regex for "N bed(s)/bedroom(s)" and "N bath(s)/bathroom(s)" */
-const BEDS_REGEX = /\b(\d+)\s*(?:bed|beds|bedroom|bedrooms|br|brs)\b/gi;
-const BATHS_REGEX = /\b(\d+)\s*(?:bath|baths|bathroom|bathrooms)\b/gi;
+/** Filler words from conversational queries ("I want to…"). */
+const INTENT_STOPWORDS = new Set<string>([
+  'i',
+  'im',
+  "i'm",
+  'want',
+  'wanna',
+  'to',
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'with',
+  'looking',
+  'look',
+  'find',
+  'me',
+  'my',
+  'some',
+  'please',
+  'need',
+  'needs',
+  'am',
+  'is',
+  'are',
+  'of',
+  'for',
+  'any',
+  'show',
+  'get',
+]);
+
+/** Word numbers for "one bedroom", "two baths", etc. */
+const NUMBER_WORDS: Record<string, number> = {
+  zero: 0,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+};
+
+const COUNT_TOKEN = `(?:\\d+|${Object.keys(NUMBER_WORDS).join('|')})`;
+
+/** Regex for "N bed(s)/bedroom(s)" and "N bath(s)/bathroom(s)" — digits or word numbers */
+const BEDS_REGEX = new RegExp(
+  `\\b(${COUNT_TOKEN})\\s*(?:bed|beds|bedroom|bedrooms|br|brs)\\b`,
+  'gi'
+);
+const BATHS_REGEX = new RegExp(
+  `\\b(${COUNT_TOKEN})\\s*(?:bath|baths|bathroom|bathrooms)\\b`,
+  'gi'
+);
 const STUDIO_REGEX = /\bstudio\b/i;
 
-/** "in <place>", "near <place>", "<place>" at end */
+/** Words that must never become a location via the trailing-token heuristic. */
+const LOCATION_REJECT_WORDS = new Set<string>([
+  ...Object.keys(NUMBER_WORDS),
+  ...INTENT_STOPWORDS,
+  'bed',
+  'beds',
+  'bedroom',
+  'bedrooms',
+  'br',
+  'brs',
+  'bath',
+  'baths',
+  'bathroom',
+  'bathrooms',
+  'studio',
+  'studios',
+]);
+
+/** "in <place>", "near <place>" */
 const IN_PLACE_REGEX = /\b(?:in|near|at)\s+([^,]+?)(?:\s+under|\s+above|\s+with|\s*$|,)/gi;
 const PRICE_UNDER_REGEX = /\b(?:under|below|max|less than)\s*[\s€$]?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k|m|million)?/gi;
 const PRICE_OVER_REGEX = /\b(?:over|above|min|more than)\s*[\s€$]?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k|m|million)?/gi;
@@ -169,11 +250,38 @@ function parseNumber(s: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function parseCountToken(s: string): number | null {
+  const lower = s.toLowerCase();
+  if (NUMBER_WORDS[lower] != null) return NUMBER_WORDS[lower];
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 function scalePrice(num: number, suffix: string): number {
   const lower = (suffix || '').toLowerCase();
   if (lower === 'k') return num * 1_000;
   if (lower === 'm' || lower === 'million') return num * 1_000_000;
   return num;
+}
+
+function inferPurpose(lower: string): 'for_sale' | 'for_rent' | undefined {
+  for (const key of PURPOSE_PHRASES) {
+    const re = new RegExp(`\\b${key.replace(/\s+/g, '\\s+')}\\b`, 'i');
+    if (re.test(lower)) return PURPOSE_WORD_MAP[key];
+  }
+  return undefined;
+}
+
+function isRejectedLocationToken(word: string): boolean {
+  const w = word.toLowerCase();
+  return (
+    LOCATION_REJECT_WORDS.has(w) ||
+    PURPOSE_WORD_MAP[w] != null ||
+    SEARCH_STOPWORDS.has(w) ||
+    PROPERTY_TYPE_MAP[w] != null ||
+    FEATURE_MAP[w] != null ||
+    /^\d+$/.test(w)
+  );
 }
 
 /**
@@ -188,11 +296,15 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   const text = query.trim();
   const lower = text.toLowerCase();
 
+  const purpose = inferPurpose(lower);
+  if (purpose) result.purpose = purpose;
+
   // --- Beds ---
+  BEDS_REGEX.lastIndex = 0;
   const bedMatch = BEDS_REGEX.exec(text);
   if (bedMatch) {
-    const n = parseInt(bedMatch[1], 10);
-    if (Number.isFinite(n)) {
+    const n = parseCountToken(bedMatch[1]);
+    if (n != null) {
       result.bedrooms = [n];
     }
   }
@@ -204,31 +316,32 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   BATHS_REGEX.lastIndex = 0;
   const bathMatch = BATHS_REGEX.exec(text);
   if (bathMatch) {
-    const n = parseInt(bathMatch[1], 10);
-    if (Number.isFinite(n) && n >= 1) {
+    const n = parseCountToken(bathMatch[1]);
+    if (n != null && n >= 1) {
       result.bathrooms = [n];
     }
   }
 
-  // --- Location: "in X", "near X" ---
+  // --- Location: prefer "in X" / "near X"; trailing tokens only if they look like a place ---
   IN_PLACE_REGEX.lastIndex = 0;
   let placeMatch = IN_PLACE_REGEX.exec(text);
   if (placeMatch) {
     result.location = placeMatch[1].trim();
   } else {
-    // Last token or two as place (e.g. "villa Costa Blanca" -> Costa Blanca)
+    // e.g. "villa Costa Blanca" → Costa Blanca (reject bedroom/property/intent tails)
     const parts = text.split(/\s+/);
     if (parts.length >= 2) {
       const last = parts[parts.length - 1];
-      const lastTwo = parts.slice(-2).join(' ');
-      const lastLower = last.toLowerCase();
-      if (
-        /^[A-Za-z]/.test(last) &&
-        !PROPERTY_TYPE_MAP[lastLower] &&
-        !FEATURE_MAP[lastLower] &&
-        !/\d/.test(lastTwo)
-      ) {
-        result.location = lastTwo.length <= 30 ? lastTwo : last;
+      const prev = parts[parts.length - 2];
+      const lastTwo = `${prev} ${last}`;
+      const lastOk = !isRejectedLocationToken(last);
+      const prevOk = !isRejectedLocationToken(prev);
+      if (lastOk && /^[A-Za-z]/.test(last)) {
+        if (prevOk && lastTwo.length <= 30) {
+          result.location = lastTwo;
+        } else {
+          result.location = last;
+        }
       }
     }
   }
@@ -236,7 +349,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   if (result.location) {
     const locationWords = result.location
       .split(/\s+/)
-      .filter((w) => !PURPOSE_WORD_MAP[w.toLowerCase()] && !SEARCH_STOPWORDS.has(w.toLowerCase()));
+      .filter((w) => !isRejectedLocationToken(w));
     const cleaned = locationWords.join(' ').trim();
     result.location = cleaned.length > 0 ? cleaned : undefined;
   }
@@ -308,14 +421,25 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   for (const key of PROPERTY_TYPE_PHRASES) {
     residual = residual.replace(new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'gi'), ' ');
   }
-  for (const key of Object.keys(PURPOSE_WORD_MAP)) {
+  for (const key of PURPOSE_PHRASES) {
     residual = residual.replace(new RegExp(`\\b${key.replace(/\s+/g, '\\s+')}\\b`, 'gi'), ' ');
   }
   for (const word of SEARCH_STOPWORDS) {
     residual = residual.replace(new RegExp(`\\b${word}\\b`, 'gi'), ' ');
   }
+  for (const word of INTENT_STOPWORDS) {
+    residual = residual.replace(new RegExp(`\\b${word.replace(/'/g, "\\'")}\\b`, 'gi'), ' ');
+  }
   residual = residual.replace(/\s+/g, ' ').trim();
   if (residual && residual.length > 1) result.keyword = residual;
+  // Avoid duplicating location in keyword (e.g. trailing-place heuristic + residual)
+  if (
+    result.keyword &&
+    result.location &&
+    result.keyword.toLowerCase() === result.location.toLowerCase()
+  ) {
+    result.keyword = undefined;
+  }
 
   return result;
 }
@@ -331,13 +455,14 @@ function mergePropertyTypeKeywordsIntoState(
 }
 
 /**
- * Merge structured NL hints (beds, baths, price, property type) without location/keyword.
+ * Merge structured NL hints (beds, baths, price, property type, purpose) without location/keyword.
  * Used alongside Typesense NL so the LLM owns full-text q while known tokens become filter_by.
  */
 export function mergeStructuredNaturalLanguageIntoState(
   state: Partial<SearchFilterState> & { purpose: string },
   nl: NaturalLanguageMapped
 ): void {
+  if (nl.purpose && !state.purpose?.trim()) state.purpose = nl.purpose;
   if (nl.bedrooms?.length && state.bedrooms == null) state.bedrooms = nl.bedrooms;
   if (nl.bathrooms?.length && state.bathrooms == null) state.bathrooms = nl.bathrooms;
   if (nl.priceMin != null && state.priceMin == null) state.priceMin = nl.priceMin;
@@ -360,21 +485,21 @@ export function mergeNaturalLanguageIntoState(
 }
 
 /**
- * Build q for Typesense NL after structured tokens are merged into filter_by.
- * Keeps location/residual keywords; uses '*' when everything was parsed structurally.
+ * q string sent to Typesense when Natural Language Search is on.
+ * Uses the original user sentence so the NL model can interpret full intent.
  */
 export function getTypesenseNlQuery(rawQ: string): string {
-  const parsed = parseNaturalLanguageQuery(rawQ);
-  const parts: string[] = [];
-  if (parsed.location?.trim()) parts.push(parsed.location.trim());
-  if (parsed.keyword?.trim()) parts.push(parsed.keyword.trim());
-  const combined = parts.join(' ').trim();
-  return combined.length > 0 ? combined : '*';
+  const trimmed = rawQ?.trim() || '';
+  return trimmed.length > 0 ? trimmed : '*';
 }
 
 /**
- * Decide whether to call Typesense NL. When every token in q maps to structured filters,
- * sanitized q is '*' and we skip NL (filter_by + q='*' is more reliable).
+ * Decide whether to call Typesense NL.
+ * nl_query=true only when:
+ *   - TYPESENSE_NL_MODEL_ID is set, AND
+ *   - q is non-empty (has data), AND
+ *   - caller did not opt out with nl_query=false
+ * No q / empty q → normal search (no nl_query / nl_model_id).
  */
 export function resolveNaturalLanguageSearchMode(
   q: string | undefined,
@@ -382,15 +507,13 @@ export function resolveNaturalLanguageSearchMode(
   nlQueryOptOut: boolean
 ): { qValue: string; willUseNl: boolean } {
   const qValue = q?.trim() || '';
-  const nlAvailable = !!nlModelId && !!qValue && !nlQueryOptOut;
-  const sanitizedNlQ = nlAvailable ? getTypesenseNlQuery(qValue) : '';
-  const willUseNl = nlAvailable && sanitizedNlQ !== '*';
+  const willUseNl = !!nlModelId && !!qValue && !nlQueryOptOut;
   return { qValue, willUseNl };
 }
 
 /**
  * Apply rule-based NL parsing to q. When structuredOnly is true (Typesense NL mode),
- * only beds/baths/price/property type are merged; location and keyword stay with the LLM.
+ * only beds/baths/price/property type/purpose are merged; location and keyword stay with the LLM.
  */
 export function applyNaturalLanguageQuery(
   state: Partial<SearchFilterState> & { purpose: string },

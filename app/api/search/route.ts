@@ -24,11 +24,11 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Search pipeline:
- *   When q is non-empty and TYPESENSE_NL_MODEL_ID is set:
- *     auto nl_query=true → Typesense with nl_model_id (same as Postman NL search).
- *   Otherwise: rule-based NL (parseNaturalLanguageQuery + mergeNaturalLanguageIntoState)
- *     → buildSearchQuery + buildFilterBy → Typesense.
- *   When Typesense NL is on, rule-based still merges beds/baths/price/property type into filter_by.
+ *   nl_query=true + nl_model_id only when q is non-empty and TYPESENSE_NL_MODEL_ID is set.
+ *   Empty/missing q → normal Typesense search (no NL params).
+ *   Explicit nl_query=false opts out even when q is set.
+ *   Rule-based parse still merges beds/baths/price/purpose/property type into filter_by
+ *     as a reliability assist alongside the LLM when NL is on.
  */
 
 const DEFAULT_COUNTRY_ID = 1;
@@ -238,7 +238,7 @@ async function runSearch(
   if (filterState.keyword) filterState.keyword = stripStopwords(filterState.keyword);
 
   const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
-  // Structured tokens (beds, type, price) are in filter_by; strip them from NL q to avoid double-filtering.
+  // NL mode: send the original natural-language sentence to Typesense (nl_query + nl_model_id).
   const q = useNl
     ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '')
     : buildSearchQuery(filterState);
