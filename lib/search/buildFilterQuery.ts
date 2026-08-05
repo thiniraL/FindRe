@@ -92,10 +92,20 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
     parts.push(`country_id:=${state.countryId}`);
   }
   if (state.completionStatuses?.length) {
-    const statusParts = state.completionStatuses.map(
-      (s) => `completion_status:=${escapeFilterValue(s)}`
+    // "all" means no completion filter — drop it from multi-select payloads
+    const statuses = state.completionStatuses.filter(
+      (s) => s?.trim() && s.trim().toLowerCase() !== 'all'
     );
-    parts.push(`(${statusParts.join(' || ')})`);
+    if (statuses.length) {
+      const statusParts = statuses.map(
+        (s) => `completion_status:=${escapeFilterValue(s)}`
+      );
+      parts.push(
+        statusParts.length === 1
+          ? statusParts[0]
+          : `(${statusParts.join(' || ')})`
+      );
+    }
   } else if (state.completionStatus && state.completionStatus !== 'all') {
     parts.push(`completion_status:=${escapeFilterValue(state.completionStatus)}`);
   }

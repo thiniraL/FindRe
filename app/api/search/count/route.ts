@@ -5,6 +5,7 @@ import {
   searchQuerySchema,
   searchBodySchema,
   agentIdFilterEntrySchema,
+  normalizeAgentIds,
 } from '@/lib/security/validation';
 import type { SearchFilterState } from '@/lib/search/buildFilterQuery';
 import { normalizeKeywords } from '@/lib/search/buildFilterQuery';
@@ -85,7 +86,7 @@ export async function GET(request: NextRequest) {
       areaMin: parsed.areaMin,
       areaMax: parsed.areaMax,
       keyword: undefined,
-      keywords: normalizeKeywords(parsed.keyword),
+      keywords: normalizeKeywords(parsed.keyword ?? parsed.keywords),
       agentIds: parseAgentIdsFromQuery(parsed.agentIds),
       featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
@@ -141,8 +142,8 @@ export async function POST(request: NextRequest) {
       areaMin: body.area?.[0],
       areaMax: body.area?.[1],
       keyword: undefined,
-      keywords: normalizeKeywords(body.keyword),
-      agentIds: body.agentIds?.length ? body.agentIds : undefined,
+      keywords: normalizeKeywords(body.keyword ?? body.keywords),
+      agentIds: normalizeAgentIds(body.agentIds),
       featureIds: body.featureIds?.length ? body.featureIds : undefined,
     };
 

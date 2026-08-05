@@ -153,6 +153,8 @@ export const searchQuerySchema = z.object({
   areaMax: z.coerce.number().min(0).optional(),
     /** Single string or comma-separated keywords, e.g. "beach,golf,marina" */
     keyword: z.string().optional(),
+    /** Alias for keyword (some clients) */
+    keywords: z.string().optional(),
     /** JSON array of { id: number, type: "agent"|"agency" } e.g. [{"id":1,"type":"agent"},{"id":2,"type":"agency"}] */
     agentIds: z.string().optional(),
     featureIds: z.string().optional(), // comma-separated feature IDs
@@ -164,10 +166,28 @@ export const searchQuerySchema = z.object({
 
 /** One agent/agency entry for agentIds filter. */
 export const agentIdFilterEntrySchema = z.object({
-  id: z.number().int().min(1),
+  id: z.coerce.number().int().min(1),
   type: z.enum(['agency', 'agent']),
 });
 export type AgentIdFilterEntry = z.infer<typeof agentIdFilterEntrySchema>;
+
+/** Normalize POST agentIds: objects and bare numbers → { id, type }[]. */
+export function normalizeAgentIds(
+  value: unknown
+): AgentIdFilterEntry[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const out: AgentIdFilterEntry[] = [];
+  for (const item of value) {
+    if (typeof item === 'number' || typeof item === 'string') {
+      const id = typeof item === 'number' ? item : parseInt(String(item), 10);
+      if (Number.isFinite(id) && id >= 1) out.push({ id, type: 'agent' });
+      continue;
+    }
+    const parsed = agentIdFilterEntrySchema.safeParse(item);
+    if (parsed.success) out.push(parsed.data);
+  }
+  return out.length ? out : undefined;
+}
 
 /** Search request body for POST. Supports arrays for multi-select filters. */
 export const searchBodySchema = z
@@ -177,23 +197,36 @@ export const searchBodySchema = z
     countryId: z.coerce.number().int().min(1).optional(),
     location: z.string().optional(),
     completionStatus: z.array(z.string()).optional(),
-    mainPropertyTypeIds: z.array(z.number().int().min(1)).optional(),
-    propertyTypeIds: z.array(z.number().int().min(1)).optional(),
-    bedrooms: z.array(z.union([z.number().int().min(0), z.string().regex(/^\d+\+$/)])).optional(),
-    bathrooms: z.array(z.union([z.number().int().min(1), z.string().regex(/^\d+\+$/)])).optional(),
+    mainPropertyTypeIds: z.array(z.coerce.number().int().min(1)).optional(),
+    propertyTypeIds: z.array(z.coerce.number().int().min(1)).optional(),
+    bedrooms: z
+      .array(z.union([z.coerce.number().int().min(0), z.string().regex(/^\d+\+$/)]))
+      .optional(),
+    bathrooms: z
+      .array(z.union([z.coerce.number().int().min(1), z.string().regex(/^\d+\+$/)]))
+      .optional(),
     /** Price range: [min, max], index 0 = min, index 1 = max */
-    price: z.tuple([z.number().min(0), z.number().min(0)]).optional(),
+    price: z
+      .tuple([z.coerce.number().min(0), z.coerce.number().min(0)])
+      .optional(),
     /** Area range (sqm): [min, max], index 0 = min, index 1 = max */
-    area: z.tuple([z.number().min(0), z.number().min(0)]).optional(),
-    /** Keywords: string or array e.g. ["beach", "golf", "marina"]; joined to one search string */
+    area: z
+      .tuple([z.coerce.number().min(0), z.coerce.number().min(0)])
+      .optional(),
+    /** Keywords: string or array e.g. ["beach", "golf", "marina"] */
     keyword: z.union([z.string(), z.array(z.string())]).optional(),
-    /** Agent/agency filter: [{"id": number, "type": "agent"|"agency"}, ...]. Maps to Typesense agent_id and agency_id. */
-    agentIds: z.array(agentIdFilterEntrySchema).optional(),
-    featureIds: z.array(z.number().int().min(1)).optional(),
+    /** Alias accepted by some clients; merged with keyword in route handlers */
+    keywords: z.union([z.string(), z.array(z.string())]).optional(),
+    /**
+     * Agent/agency filter: [{"id": number, "type": "agent"|"agency"}, ...]
+     * Bare numbers also accepted; normalized in route via normalizeAgentIds.
+     */
+    agentIds: z.array(z.unknown()).optional(),
+    featureIds: z.array(z.coerce.number().int().min(1)).optional(),
     /** Use Typesense Natural Language Search (LLM parses q into filters/sorts). */
     nl_query: z.boolean().optional(),
-    page: z.number().int().min(1).optional(),
-    limit: z.number().int().min(1).max(100).optional(),
+    page: z.coerce.number().int().min(1).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
   })
   .strict();
 
