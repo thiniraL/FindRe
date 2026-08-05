@@ -12,13 +12,19 @@ export type NaturalLanguageMapped = {
   keyword?: string;
   /** Inferred from buy/rent/sale/lease words when present */
   purpose?: 'for_sale' | 'for_rent';
-  bedrooms?: number[];
-  bathrooms?: number[];
+  bedrooms?: (number | string)[];
+  bathrooms?: (number | string)[];
   priceMin?: number;
   priceMax?: number;
+  areaMin?: number;
+  areaMax?: number;
   featureKeys?: string[];
   /** Property type keywords (villa, apartment, etc.) – client/API can map to propertyTypeIds */
   propertyTypeKeywords?: string[];
+  /** Main type hints: residential | commercial */
+  mainPropertyTypeKeywords?: string[];
+  /** Completion: ready | off_plan */
+  completionStatus?: string;
 };
 
 /** Feature words/phrases → config value (e.g. pool, garden, ac) */
@@ -45,6 +51,15 @@ const FEATURE_MAP: Record<string, string> = {
   fireplaces: 'fireplace',
   security: 'security',
   'security system': 'security',
+  golf: 'golf',
+  'golf course': 'golf',
+  'golf view': 'golf',
+  beachfront: 'beachfront',
+  'beach front': 'beachfront',
+  beach: 'beachfront',
+  waterfront: 'waterfront',
+  'water front': 'waterfront',
+  marina: 'marina',
 };
 
 /**
@@ -191,6 +206,7 @@ const INTENT_STOPWORDS = new Set<string>([
   'any',
   'show',
   'get',
+  'search',
 ]);
 
 /** Word numbers for "one bedroom", "two baths", etc. */
@@ -208,15 +224,46 @@ const NUMBER_WORDS: Record<string, number> = {
   ten: 10,
 };
 
+/** Phrase amounts used in prices: "one hundred thousand", "two hundred thousand" */
+const WORD_AMOUNT_MAP: Record<string, number> = {
+  'one hundred thousand': 100_000,
+  'two hundred thousand': 200_000,
+  'three hundred thousand': 300_000,
+  'four hundred thousand': 400_000,
+  'five hundred thousand': 500_000,
+  'six hundred thousand': 600_000,
+  'seven hundred thousand': 700_000,
+  'eight hundred thousand': 800_000,
+  'nine hundred thousand': 900_000,
+  'a hundred thousand': 100_000,
+  'one hundred': 100,
+  'two hundred': 200,
+  'three hundred': 300,
+  'four hundred': 400,
+  'five hundred': 500,
+  'eight hundred': 800,
+  thousand: 1_000,
+  hundred: 100,
+};
+
 const COUNT_TOKEN = `(?:\\d+|${Object.keys(NUMBER_WORDS).join('|')})`;
 
-/** Regex for "N bed(s)/bedroom(s)" and "N bath(s)/bathroom(s)" — digits or word numbers */
+/** Regex for "N bed(s)/bedroom(s)" and "N bath(s)/bathroom(s)" — digits/words, optional hyphen */
 const BEDS_REGEX = new RegExp(
-  `\\b(${COUNT_TOKEN})\\s*(?:bed|beds|bedroom|bedrooms|br|brs)\\b`,
+  `\\b(${COUNT_TOKEN})\\s*[-]?\\s*(?:bed|beds|bedroom|bedrooms|br|brs)\\b`,
   'gi'
 );
 const BATHS_REGEX = new RegExp(
-  `\\b(${COUNT_TOKEN})\\s*(?:bath|baths|bathroom|bathrooms)\\b`,
+  `\\b(${COUNT_TOKEN})\\s*[-]?\\s*(?:bath|baths|bathroom|bathrooms)\\b`,
+  'gi'
+);
+/** "at least N bathrooms", "N or more bedrooms" → N+ */
+const BEDS_PLUS_REGEX = new RegExp(
+  `\\b(?:at\\s+least|minimum|min)\\s+(${COUNT_TOKEN})\\s*[-]?\\s*(?:bed|beds|bedroom|bedrooms)\\b|\\b(${COUNT_TOKEN})\\s+or\\s+more\\s+(?:bed|beds|bedroom|bedrooms)\\b`,
+  'gi'
+);
+const BATHS_PLUS_REGEX = new RegExp(
+  `\\b(?:at\\s+least|minimum|min)\\s+(${COUNT_TOKEN})\\s*[-]?\\s*(?:bath|baths|bathroom|bathrooms)\\b|\\b(${COUNT_TOKEN})\\s+or\\s+more\\s+(?:bath|baths|bathroom|bathrooms)\\b`,
   'gi'
 );
 const STUDIO_REGEX = /\bstudio\b/i;
@@ -237,16 +284,80 @@ const LOCATION_REJECT_WORDS = new Set<string>([
   'bathrooms',
   'studio',
   'studios',
+  'eur',
+  'euro',
+  'euros',
+  'usd',
+  'sqm',
+  'sq',
+  'square',
+  'meters',
+  'metres',
+  'meter',
+  'metre',
+  'm2',
+  'thousand',
+  'hundred',
+  'million',
+  'cheapest',
+  'modern',
+  'new',
+  'newly',
+  'built',
+  'residential',
+  'commercial',
+  'homes',
+  'home',
+  'view',
+  'course',
+  'least',
+  'more',
+  'larger',
+  'than',
+  'between',
+  'under',
+  'below',
+  'above',
+  'over',
+  'close',
+  'near',
 ]);
 
-/** "in <place>", "near <place>" */
-const IN_PLACE_REGEX = /\b(?:in|near|at)\s+([^,]+?)(?:\s+under|\s+above|\s+with|\s*$|,)/gi;
-const PRICE_UNDER_REGEX = /\b(?:under|below|max|less than)\s*[\s€$]?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k|m|million)?/gi;
-const PRICE_OVER_REGEX = /\b(?:over|above|min|more than)\s*[\s€$]?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k|m|million)?/gi;
-const PRICE_RANGE_REGEX = /\b[\s€$]?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k|m|million)?\s*[-–—to]\s*[\s€$]?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k|m|million)?/gi;
+const CURRENCY_SUFFIX = `(?:\\s*(?:euros|euro|eur|usd|dollars|£|€|\\$))?`;
+/** Digits with optional space/comma thousands: 90 000, 90,000, 90000 — (?!\d) avoids matching 20 inside 200 */
+const MONEY_NUM = `(\\d+(?:[\\s,]\\d{3})*(?:\\.\\d+)?)(?!\\d)`;
+const MONEY_SCALE = `(k|m|million|thousand)?`;
+
+/** "in <place>", "near <place>", "close to <place>" — stop before price/area/with clauses */
+const IN_PLACE_REGEX =
+  /\b(?:in|near|at|close\s+to)\s+([A-Za-z][A-Za-z\s.'-]{1,40}?)(?=\s+(?:under|below|above|over|with|between|and|,|$)|$)/gi;
+
+const PRICE_UNDER_REGEX = new RegExp(
+  `\\b(?:under|below|max|less\\s+than)\\s*[€$]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}${CURRENCY_SUFFIX}(?!\\s*(?:sqm|sq\\.?\\s*m|m2|square))`,
+  'gi'
+);
+const PRICE_OVER_REGEX = new RegExp(
+  `\\b(?:over|above|min|more\\s+than)\\s*[€$]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}${CURRENCY_SUFFIX}(?!\\s*(?:sqm|sq\\.?\\s*m|m2|square))`,
+  'gi'
+);
+/** Numeric between-range only when currency/scale present (avoid "between 75 and 120 square meters") */
+const PRICE_RANGE_REGEX = new RegExp(
+  `\\bbetween\\s+[€$]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}\\s+(?:and|to)\\s+[€$]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}(?:\\s*(?:eur|euros|euro|usd|dollars|£|€|\\$))`,
+  'gi'
+);
+
+/** Area: "100 square meters", "75 and 120 sqm", "at least 100 sqm", "larger than 150 m2" */
+const AREA_MIN_REGEX =
+  /\b(?:at\s+least|minimum|min|larger\s+than|more\s+than|over|above)\s+(\d+(?:[.,]\d+)?)\s*(?:sqm|sq\.?\s*m|m2|square\s*met(?:er|re)s?)\b/gi;
+const AREA_MAX_REGEX =
+  /\b(?:under|below|max|less\s+than|up\s+to)\s+(\d+(?:[.,]\d+)?)\s*(?:sqm|sq\.?\s*m|m2|square\s*met(?:er|re)s?)\b/gi;
+const AREA_RANGE_REGEX =
+  /\b(?:between)\s+(\d+(?:[.,]\d+)?)\s*(?:and|to|-)\s*(\d+(?:[.,]\d+)?)\s*(?:sqm|sq\.?\s*m|m2|square\s*met(?:er|re)s?)\b/gi;
+const AREA_BARE_RANGE_REGEX =
+  /\b(\d+(?:[.,]\d+)?)\s*(?:and|to|-)\s*(\d+(?:[.,]\d+)?)\s*(?:sqm|sq\.?\s*m|m2|square\s*met(?:er|re)s?)\b/gi;
 
 function parseNumber(s: string): number {
-  const n = parseFloat(s.replace(/,/g, ''));
+  const n = parseFloat(String(s).replace(/[\s,]/g, ''));
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -259,9 +370,39 @@ function parseCountToken(s: string): number | null {
 
 function scalePrice(num: number, suffix: string): number {
   const lower = (suffix || '').toLowerCase();
-  if (lower === 'k') return num * 1_000;
+  if (lower === 'k' || lower === 'thousand') return num * 1_000;
   if (lower === 'm' || lower === 'million') return num * 1_000_000;
   return num;
+}
+
+/** Parse "under/below …" word amounts like "two hundred thousand euros". */
+function parseWordPriceMax(lower: string): number | undefined {
+  // "under 8 hundred thousand"
+  const nHundred = lower.match(
+    /\b(?:under|below|max|less\s+than)\s+(\d+)\s+hundred(?:\s+thousand)?\b/
+  );
+  if (nHundred) {
+    const n = parseInt(nHundred[1], 10);
+    return nHundred[0].includes('thousand') ? n * 100_000 : n * 100;
+  }
+  const under = lower.match(
+    /\b(?:under|below|max|less\s+than)\s+(?:€|\$)?\s*((?:a|one|two|three|four|five|six|seven|eight|nine)(?:\s+hundred)?(?:\s+thousand)?)/i
+  );
+  if (!under) return undefined;
+  const phrase = under[1].replace(/\s+/g, ' ').trim().toLowerCase();
+  if (WORD_AMOUNT_MAP[phrase] != null) return WORD_AMOUNT_MAP[phrase];
+  return undefined;
+}
+
+function parseWordPriceRange(lower: string): { min?: number; max?: number } {
+  const m = lower.match(
+    /\bbetween\s+((?:a|one|two|three|four|five|six|seven|eight|nine)(?:\s+hundred)?(?:\s+thousand)?)\s+and\s+((?:a|one|two|three|four|five|six|seven|eight|nine)(?:\s+hundred)?(?:\s+thousand)?)/i
+  );
+  if (!m) return {};
+  const a = WORD_AMOUNT_MAP[m[1].replace(/\s+/g, ' ').trim().toLowerCase()];
+  const b = WORD_AMOUNT_MAP[m[2].replace(/\s+/g, ' ').trim().toLowerCase()];
+  if (a == null || b == null) return {};
+  return { min: Math.min(a, b), max: Math.max(a, b) };
 }
 
 function inferPurpose(lower: string): 'for_sale' | 'for_rent' | undefined {
@@ -273,15 +414,27 @@ function inferPurpose(lower: string): 'for_sale' | 'for_rent' | undefined {
 }
 
 function isRejectedLocationToken(word: string): boolean {
-  const w = word.toLowerCase();
+  const w = word.toLowerCase().replace(/[.,;:!?]+$/g, '');
   return (
     LOCATION_REJECT_WORDS.has(w) ||
     PURPOSE_WORD_MAP[w] != null ||
     SEARCH_STOPWORDS.has(w) ||
     PROPERTY_TYPE_MAP[w] != null ||
     FEATURE_MAP[w] != null ||
-    /^\d+$/.test(w)
+    /^\d+$/.test(w) ||
+    /^\d+-/.test(w)
   );
+}
+
+function cleanLocation(raw: string | undefined): string | undefined {
+  if (!raw?.trim()) return undefined;
+  const cleaned = raw
+    .replace(/[.,;:!?]+$/g, '')
+    .split(/\s+/)
+    .filter((w) => !isRejectedLocationToken(w))
+    .join(' ')
+    .trim();
+  return cleaned.length > 0 ? cleaned : undefined;
 }
 
 /**
@@ -293,133 +446,183 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   const result: NaturalLanguageMapped = {};
   if (!query?.trim()) return result;
 
-  const text = query.trim();
+  const text = query
+    .trim()
+    // "buy3 bathrooms" / "3bedroom" → insert spaces for tokenization
+    .replace(/([A-Za-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([A-Za-z])/g, '$1 $2');
   const lower = text.toLowerCase();
 
   const purpose = inferPurpose(lower);
   if (purpose) result.purpose = purpose;
 
-  // --- Beds ---
-  BEDS_REGEX.lastIndex = 0;
-  const bedMatch = BEDS_REGEX.exec(text);
-  if (bedMatch) {
-    const n = parseCountToken(bedMatch[1]);
-    if (n != null) {
-      result.bedrooms = [n];
+  // --- Beds / baths: "at least N" / "N or more" first (plus), then exact ---
+  BEDS_PLUS_REGEX.lastIndex = 0;
+  const bedsPlus = BEDS_PLUS_REGEX.exec(text);
+  if (bedsPlus) {
+    const n = parseCountToken(bedsPlus[1] || bedsPlus[2]);
+    if (n != null) result.bedrooms = [`${n}+`];
+  } else {
+    BEDS_REGEX.lastIndex = 0;
+    const bedMatch = BEDS_REGEX.exec(text);
+    if (bedMatch) {
+      const n = parseCountToken(bedMatch[1]);
+      if (n != null) result.bedrooms = [n];
     }
   }
-  if (STUDIO_REGEX.test(text)) {
+  if (STUDIO_REGEX.test(text) && result.bedrooms == null) {
     result.bedrooms = [0];
   }
 
-  // --- Baths ---
-  BATHS_REGEX.lastIndex = 0;
-  const bathMatch = BATHS_REGEX.exec(text);
-  if (bathMatch) {
-    const n = parseCountToken(bathMatch[1]);
-    if (n != null && n >= 1) {
-      result.bathrooms = [n];
-    }
-  }
-
-  // --- Location: prefer "in X" / "near X"; trailing tokens only if they look like a place ---
-  IN_PLACE_REGEX.lastIndex = 0;
-  let placeMatch = IN_PLACE_REGEX.exec(text);
-  if (placeMatch) {
-    result.location = placeMatch[1].trim();
+  BATHS_PLUS_REGEX.lastIndex = 0;
+  const bathsPlus = BATHS_PLUS_REGEX.exec(text);
+  if (bathsPlus) {
+    const n = parseCountToken(bathsPlus[1] || bathsPlus[2]);
+    if (n != null && n >= 1) result.bathrooms = [`${n}+`];
   } else {
-    // e.g. "villa Costa Blanca" → Costa Blanca (reject bedroom/property/intent tails)
-    const parts = text.split(/\s+/);
-    if (parts.length >= 2) {
-      const last = parts[parts.length - 1];
-      const prev = parts[parts.length - 2];
-      const lastTwo = `${prev} ${last}`;
-      const lastOk = !isRejectedLocationToken(last);
-      const prevOk = !isRejectedLocationToken(prev);
-      if (lastOk && /^[A-Za-z]/.test(last)) {
-        if (prevOk && lastTwo.length <= 30) {
-          result.location = lastTwo;
-        } else {
-          result.location = last;
-        }
-      }
+    BATHS_REGEX.lastIndex = 0;
+    const bathMatch = BATHS_REGEX.exec(text);
+    if (bathMatch) {
+      const n = parseCountToken(bathMatch[1]);
+      if (n != null && n >= 1) result.bathrooms = [n];
     }
   }
-  // Strip purpose words and generic stopwords from location so they aren't sent to Typesense
-  if (result.location) {
-    const locationWords = result.location
-      .split(/\s+/)
-      .filter((w) => !isRejectedLocationToken(w));
-    const cleaned = locationWords.join(' ').trim();
-    result.location = cleaned.length > 0 ? cleaned : undefined;
+
+  // --- Location: "in/near/at/close to X" only (no trailing-token guess — too noisy) ---
+  IN_PLACE_REGEX.lastIndex = 0;
+  const placeMatch = IN_PLACE_REGEX.exec(text);
+  if (placeMatch) {
+    result.location = cleanLocation(placeMatch[1]);
   }
 
-  // --- Price: under X, over X, X-Y ---
-  PRICE_UNDER_REGEX.lastIndex = 0;
-  placeMatch = PRICE_UNDER_REGEX.exec(text);
-  if (placeMatch) {
-    const num = parseNumber(placeMatch[1]);
-    const suffix = placeMatch[2] || '';
-    result.priceMax = scalePrice(num, suffix);
+  // --- Area (before price so "more than 200 square meters" isn't treated as price) ---
+  AREA_RANGE_REGEX.lastIndex = 0;
+  let areaMatch = AREA_RANGE_REGEX.exec(text);
+  if (!areaMatch) {
+    AREA_BARE_RANGE_REGEX.lastIndex = 0;
+    areaMatch = AREA_BARE_RANGE_REGEX.exec(text);
   }
-  PRICE_OVER_REGEX.lastIndex = 0;
-  placeMatch = PRICE_OVER_REGEX.exec(text);
-  if (placeMatch) {
-    const num = parseNumber(placeMatch[1]);
-    const suffix = placeMatch[2] || '';
-    result.priceMin = scalePrice(num, suffix);
-  }
-  PRICE_RANGE_REGEX.lastIndex = 0;
-  placeMatch = PRICE_RANGE_REGEX.exec(text);
-  if (placeMatch) {
-    const a = parseNumber(placeMatch[1]);
-    const b = parseNumber(placeMatch[3]);
-    const sufA = placeMatch[2] || '';
-    const sufB = placeMatch[4] || '';
-    const minP = scalePrice(Math.min(a, b), sufA);
-    const maxP = scalePrice(Math.max(a, b), sufB);
-    if (result.priceMin == null) result.priceMin = minP;
-    if (result.priceMax == null) result.priceMax = maxP;
+  if (areaMatch) {
+    const a = parseNumber(areaMatch[1]);
+    const b = parseNumber(areaMatch[2]);
+    result.areaMin = Math.min(a, b);
+    result.areaMax = Math.max(a, b);
+  } else {
+    AREA_MIN_REGEX.lastIndex = 0;
+    const amin = AREA_MIN_REGEX.exec(text);
+    if (amin) result.areaMin = parseNumber(amin[1]);
+    AREA_MAX_REGEX.lastIndex = 0;
+    const amax = AREA_MAX_REGEX.exec(text);
+    if (amax) result.areaMax = parseNumber(amax[1]);
   }
 
-  // --- Features: words that match FEATURE_MAP ---
-  const words = lower.split(/\s+/);
+  // --- Price: word amounts first (so "under 8 hundred thousand" isn't priceMax=8), then numeric ---
+  const wordMax = parseWordPriceMax(lower);
+  const wordRange = parseWordPriceRange(lower);
+  if (wordMax != null) result.priceMax = wordMax;
+  if (wordRange.min != null) result.priceMin = wordRange.min;
+  if (wordRange.max != null) result.priceMax = wordRange.max;
+
+  if (result.priceMax == null) {
+    PRICE_UNDER_REGEX.lastIndex = 0;
+    const priceMatch = PRICE_UNDER_REGEX.exec(text);
+    if (priceMatch) {
+      result.priceMax = scalePrice(parseNumber(priceMatch[1]), priceMatch[2] || '');
+    }
+  }
+  if (result.priceMin == null) {
+    PRICE_OVER_REGEX.lastIndex = 0;
+    const priceMatch = PRICE_OVER_REGEX.exec(text);
+    if (priceMatch) {
+      result.priceMin = scalePrice(parseNumber(priceMatch[1]), priceMatch[2] || '');
+    }
+  }
+  if (result.priceMin == null && result.priceMax == null) {
+    PRICE_RANGE_REGEX.lastIndex = 0;
+    const priceMatch = PRICE_RANGE_REGEX.exec(text);
+    if (priceMatch) {
+      const a = scalePrice(parseNumber(priceMatch[1]), priceMatch[2] || '');
+      const b = scalePrice(parseNumber(priceMatch[3]), priceMatch[4] || '');
+      result.priceMin = Math.min(a, b);
+      result.priceMax = Math.max(a, b);
+    }
+  }
+  // "below one 90 000" — optional filler word between below and amount
+  if (result.priceMax == null) {
+    const spaced = text.match(
+      /\b(?:under|below)\s+(?:one|a)?\s*[€$]?\s*(\d+(?:[\s,]\d{3})+)\s*(k|m|million|thousand)?/i
+    );
+    if (spaced) {
+      result.priceMax = scalePrice(parseNumber(spaced[1]), spaced[2] || '');
+    }
+  }
+
+  // --- Completion / new build ---
+  if (/\b(?:newly\s+built|new\s+build|off[-\s]?plan|under\s+construction)\b/i.test(text)) {
+    result.completionStatus = 'off_plan';
+  } else if (/\b(?:ready|completed|resale)\b/i.test(text)) {
+    result.completionStatus = 'ready';
+  }
+
+  // --- Main type: residential / commercial ---
+  if (/\bresidential\b/i.test(text)) result.mainPropertyTypeKeywords = ['residential'];
+  if (/\bcommercial\b/i.test(text)) result.mainPropertyTypeKeywords = ['commercial'];
+
+  // --- Features ---
   const featureSet = new Set<string>();
-  for (const w of words) {
-    const v = FEATURE_MAP[w];
-    if (v) featureSet.add(v);
+  for (const phrase of Object.keys(FEATURE_MAP).sort((a, b) => b.length - a.length)) {
+    const re = new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
+    if (re.test(lower)) featureSet.add(FEATURE_MAP[phrase]);
   }
-  // Phrases (e.g. "air conditioning")
-  if (lower.includes('air conditioning')) featureSet.add('ac');
-  if (lower.includes('security system')) featureSet.add('security');
   if (featureSet.size) result.featureKeys = Array.from(featureSet);
 
-  // --- Property type keywords (phrases before single words) ---
+  // --- Property type keywords ---
   const typeSet = new Set<string>();
   let typeScan = lower;
   for (const phrase of PROPERTY_TYPE_PHRASES) {
-    const re = new RegExp(`\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
+    const re = new RegExp(
+      `\\b${phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`,
+      'i'
+    );
     if (re.test(typeScan)) {
       typeSet.add(PROPERTY_TYPE_MAP[phrase]);
       typeScan = typeScan.replace(re, ' ');
     }
   }
+  // "homes" → house
+  if (/\bhomes?\b/i.test(text) && !typeSet.size) typeSet.add('house');
   if (typeSet.size) result.propertyTypeKeywords = Array.from(typeSet);
 
-  // --- Residual keyword: strip extracted parts for a cleaner full-text q ---
+  // --- Residual keyword ---
   BEDS_REGEX.lastIndex = 0;
   BATHS_REGEX.lastIndex = 0;
   let residual = text;
+  residual = residual.replace(BEDS_PLUS_REGEX, ' ').replace(BATHS_PLUS_REGEX, ' ');
   residual = residual.replace(BEDS_REGEX, ' ').replace(BATHS_REGEX, ' ');
   residual = residual.replace(STUDIO_REGEX, ' ');
   residual = residual.replace(PRICE_UNDER_REGEX, ' ').replace(PRICE_OVER_REGEX, ' ');
   residual = residual.replace(PRICE_RANGE_REGEX, ' ');
+  residual = residual.replace(AREA_MIN_REGEX, ' ').replace(AREA_MAX_REGEX, ' ');
+  residual = residual.replace(AREA_RANGE_REGEX, ' ').replace(AREA_BARE_RANGE_REGEX, ' ');
   residual = residual.replace(IN_PLACE_REGEX, ' ');
-  for (const key of Object.keys(FEATURE_MAP)) {
+  for (const key of Object.keys(WORD_AMOUNT_MAP).sort((a, b) => b.length - a.length)) {
     residual = residual.replace(new RegExp(`\\b${key.replace(/\s+/g, '\\s+')}\\b`, 'gi'), ' ');
   }
+  residual = residual.replace(/\b(?:under|below|between|above|over|at\s+least|more\s+than|less\s+than|close\s+to)\b/gi, ' ');
+  residual = residual.replace(/\b(?:euros|euro|eur|usd)\b/gi, ' ');
+  residual = residual.replace(/[€$£]/g, ' ');
+  residual = residual.replace(/\b(?:newly\s+built|new\s+build|off[-\s]?plan|ready|completed|resale|residential|commercial|modern|cheapest)\b/gi, ' ');
+  for (const key of Object.keys(FEATURE_MAP).sort((a, b) => b.length - a.length)) {
+    residual = residual.replace(
+      new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'gi'),
+      ' '
+    );
+  }
   for (const key of PROPERTY_TYPE_PHRASES) {
-    residual = residual.replace(new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'gi'), ' ');
+    residual = residual.replace(
+      new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'gi'),
+      ' '
+    );
   }
   for (const key of PURPOSE_PHRASES) {
     residual = residual.replace(new RegExp(`\\b${key.replace(/\s+/g, '\\s+')}\\b`, 'gi'), ' ');
@@ -428,11 +631,13 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
     residual = residual.replace(new RegExp(`\\b${word}\\b`, 'gi'), ' ');
   }
   for (const word of INTENT_STOPWORDS) {
-    residual = residual.replace(new RegExp(`\\b${word.replace(/'/g, "\\'")}\\b`, 'gi'), ' ');
+    residual = residual.replace(
+      new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\']/g, '\\$&')}\\b`, 'gi'),
+      ' '
+    );
   }
-  residual = residual.replace(/\s+/g, ' ').trim();
+  residual = residual.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
   if (residual && residual.length > 1) result.keyword = residual;
-  // Avoid duplicating location in keyword (e.g. trailing-place heuristic + residual)
   if (
     result.keyword &&
     result.location &&
@@ -467,7 +672,17 @@ export function mergeStructuredNaturalLanguageIntoState(
   if (nl.bathrooms?.length && state.bathrooms == null) state.bathrooms = nl.bathrooms;
   if (nl.priceMin != null && state.priceMin == null) state.priceMin = nl.priceMin;
   if (nl.priceMax != null && state.priceMax == null) state.priceMax = nl.priceMax;
+  if (nl.areaMin != null && state.areaMin == null) state.areaMin = nl.areaMin;
+  if (nl.areaMax != null && state.areaMax == null) state.areaMax = nl.areaMax;
+  if (nl.completionStatus && !state.completionStatus && !state.completionStatuses?.length) {
+    state.completionStatus = nl.completionStatus;
+  }
   mergePropertyTypeKeywordsIntoState(state, nl.propertyTypeKeywords);
+  // Feature / amenity words → full-text keywords (OR multi-search when multiple)
+  if (nl.featureKeys?.length) {
+    const extra = nl.featureKeys;
+    state.keywords = [...new Set([...(state.keywords ?? []), ...extra])];
+  }
 }
 
 /**
