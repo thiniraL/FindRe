@@ -34,24 +34,33 @@ export type NaturalLanguageMapped = {
   sortBy?: string;
 };
 
-/** Feature words/phrases → config value (e.g. pool, garden, ac) */
+/** Feature / amenity phrases customers say → canonical key */
 const FEATURE_MAP: Record<string, string> = {
   pool: 'pool',
   pools: 'pool',
   swimming: 'pool',
   'swimming pool': 'pool',
   'swimming pools': 'pool',
+  'private pool': 'pool',
+  'communal pool': 'pool',
+  'shared pool': 'pool',
   garden: 'garden',
   gardens: 'garden',
+  'private garden': 'garden',
   garage: 'garage',
   garages: 'garage',
-  parking: 'garage',
+  parking: 'parking',
+  'parking space': 'parking',
+  'parking spaces': 'parking',
   balcony: 'balcony',
   balconies: 'balcony',
+  terrace: 'terrace',
+  terraces: 'terrace',
   elevator: 'elevator',
   lift: 'elevator',
   lifts: 'elevator',
   'air conditioning': 'ac',
+  'air con': 'ac',
   ac: 'ac',
   'a/c': 'ac',
   fireplace: 'fireplace',
@@ -61,13 +70,57 @@ const FEATURE_MAP: Record<string, string> = {
   golf: 'golf',
   'golf course': 'golf',
   'golf view': 'golf',
+  'near golf': 'golf',
   beachfront: 'beachfront',
   'beach front': 'beachfront',
+  'beach-front': 'beachfront',
   beach: 'beachfront',
+  'near the beach': 'beachfront',
+  'by the beach': 'beachfront',
   waterfront: 'waterfront',
   'water front': 'waterfront',
+  'sea view': 'sea_view',
+  seaview: 'sea_view',
+  'sea views': 'sea_view',
+  marina: 'marina',
+  'near marina': 'marina',
+  'close to marina': 'marina',
+};
+
+/**
+ * Canonical amenity → Typesense/filter keyword chip (same values as KEYWORDS filter).
+ * Prefer keys that return hits in catalog full-text (beach not beachfront, lift not elevator).
+ */
+const FEATURE_TO_KEYWORD: Record<string, string> = {
+  pool: 'pool',
+  garden: 'garden',
+  garage: 'garage',
+  parking: 'parking',
+  balcony: 'balcony',
+  terrace: 'terrace',
+  elevator: 'lift',
+  ac: 'ac',
+  fireplace: 'fireplace',
+  security: 'security',
+  golf: 'golf',
+  beachfront: 'beach',
+  waterfront: 'waterfront',
+  sea_view: 'sea view',
   marina: 'marina',
 };
+
+function amenityKeysToKeywords(keys: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const k of keys) {
+    const kw = FEATURE_TO_KEYWORD[k] ?? k;
+    const id = kw.toLowerCase();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(kw);
+  }
+  return out;
+}
 
 /**
  * Search words/phrases → canonical group key.
@@ -138,7 +191,8 @@ const PROPERTY_TYPE_KEY_TO_IDS: Record<string, number[]> = {
   townhouse: [30, 37],
   bungalow: [33, 38, 48, 49],
   studio: [52],
-  house: [34, 39, 42, 54, 55],
+  // "house" in customer speech often means any dwelling — include villa/bungalow/townhouse
+  house: [34, 39, 42, 54, 55, 26, 36, 41, 45, 57, 33, 38, 48, 49, 30, 37],
   duplex: [54, 51],
   semi: [31, 32, 47],
   land: [43, 44],
@@ -340,18 +394,51 @@ const IN_PLACE_REGEX =
   /\b(?:in|near|at|close\s+to)\s+([A-Za-z][A-Za-z\s.'-]{1,40}?)(?=\s+(?:under|below|above|over|with|between|and|,|$)|$)/gi;
 
 const PRICE_UNDER_REGEX = new RegExp(
-  `\\b(?:under|below|max|less\\s+than)\\s*[€$]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}${CURRENCY_SUFFIX}(?!\\s*(?:sqm|sq\\.?\\s*m|m2|square))`,
+  `\\b(?:under|below|max|less\\s+than)\\s*[€$£]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}${CURRENCY_SUFFIX}(?!\\s*(?:sqm|sq\\.?\\s*m|m2|square))`,
   'gi'
 );
 const PRICE_OVER_REGEX = new RegExp(
-  `\\b(?:over|above|min|more\\s+than)\\s*[€$]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}${CURRENCY_SUFFIX}(?!\\s*(?:sqm|sq\\.?\\s*m|m2|square))`,
+  `\\b(?:over|above|min|more\\s+than)\\s*[€$£]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}${CURRENCY_SUFFIX}(?!\\s*(?:sqm|sq\\.?\\s*m|m2|square))`,
   'gi'
 );
-/** Numeric between-range only when currency/scale present (avoid "between 75 and 120 square meters") */
+/**
+ * Numeric between-range for prices (voice + typed).
+ * Currency may appear on either amount or as a trailing word (€ / euros / EUR).
+ * Without currency, only large amounts are accepted (avoids "between 75 and 120" area).
+ */
 const PRICE_RANGE_REGEX = new RegExp(
-  `\\bbetween\\s+[€$]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}\\s+(?:and|to)\\s+[€$]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}(?:\\s*(?:eur|euros|euro|usd|dollars|£|€|\\$))`,
+  `\\bbetween\\s+[€$£]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}\\s+(?:and|to)\\s+[€$£]?\\s*${MONEY_NUM}\\s*${MONEY_SCALE}${CURRENCY_SUFFIX}`,
   'gi'
 );
+
+/** True if a matched span looks like money (symbol/word) rather than bare small integers. */
+function priceMatchHasCurrency(span: string): boolean {
+  return /[€$£]|\b(?:euros?|eur|usd|dollars)\b/i.test(span);
+}
+
+/** Accept bare numeric between-range only when clearly in price territory. */
+function isLikelyPriceRange(a: number, b: number): boolean {
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  return lo >= 1_000 && hi >= 10_000;
+}
+
+/**
+ * Normalize voice/typed money so parsers see compact integers:
+ * - "100,000" / "1,250,000" (US/UK)
+ * - "100.000" / "1.250.000" (EU thousands)
+ * - "€ 200,000" → "€200000"
+ */
+function normalizeMoneyForNl(raw: string): string {
+  let s = raw;
+  // EU thousands groups (100.000) — not decimals like 100.5 / 75.25
+  s = s.replace(/\b(\d{1,3}(?:\.\d{3})+)\b/g, (m) => m.replace(/\./g, ''));
+  // US/UK thousands (100,000)
+  s = s.replace(/\b(\d{1,3}(?:,\d{3})+)\b/g, (m) => m.replace(/,/g, ''));
+  // Tight currency symbol before amount
+  s = s.replace(/([€$£])\s+(?=\d)/g, '$1');
+  return s;
+}
 
 /** Area: "100 square meters", "75 and 120 sqm", "at least 100 sqm", "larger than 150 m2" */
 const AREA_MIN_REGEX =
@@ -453,8 +540,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   const result: NaturalLanguageMapped = {};
   if (!query?.trim()) return result;
 
-  const text = query
-    .trim()
+  const text = normalizeMoneyForNl(query.trim())
     // "buy3 bathrooms" / "3bedroom" → insert spaces for tokenization
     .replace(/([A-Za-z])(\d)/g, '$1 $2')
     .replace(/(\d)([A-Za-z])/g, '$1 $2');
@@ -464,6 +550,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   if (purpose) result.purpose = purpose;
 
   // --- Beds / baths: "at least N" / "N or more" first (plus), then exact ---
+  // Conversational "4 bedrooms" / "2 bathrooms" → N+ (customer usually means at least N)
   BEDS_PLUS_REGEX.lastIndex = 0;
   const bedsPlus = BEDS_PLUS_REGEX.exec(text);
   if (bedsPlus) {
@@ -474,7 +561,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
     const bedMatch = BEDS_REGEX.exec(text);
     if (bedMatch) {
       const n = parseCountToken(bedMatch[1]);
-      if (n != null) result.bedrooms = [n];
+      if (n != null) result.bedrooms = [`${n}+`];
     }
   }
   if (STUDIO_REGEX.test(text) && result.bedrooms == null) {
@@ -491,7 +578,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
     const bathMatch = BATHS_REGEX.exec(text);
     if (bathMatch) {
       const n = parseCountToken(bathMatch[1]);
-      if (n != null && n >= 1) result.bathrooms = [n];
+      if (n != null && n >= 1) result.bathrooms = [`${n}+`];
     }
   }
 
@@ -550,8 +637,10 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
     if (priceMatch) {
       const a = scalePrice(parseNumber(priceMatch[1]), priceMatch[2] || '');
       const b = scalePrice(parseNumber(priceMatch[3]), priceMatch[4] || '');
-      result.priceMin = Math.min(a, b);
-      result.priceMax = Math.max(a, b);
+      if (priceMatchHasCurrency(priceMatch[0]) || isLikelyPriceRange(a, b)) {
+        result.priceMin = Math.min(a, b);
+        result.priceMax = Math.max(a, b);
+      }
     }
   }
   // "below one 90 000" — optional filler word between below and amount
@@ -603,8 +692,9 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
       typeScan = typeScan.replace(re, ' ');
     }
   }
-  // "homes" / "home" → house
-  if (/\bhomes?\b/i.test(text) && !typeSet.size) typeSet.add('house');
+  // "homes" / "home" → house only when no stronger type and no amenity
+  // (amenity + generic "homes" would AND type IDs and wipe garden/terrace stock)
+  if (/\bhomes?\b/i.test(text) && !typeSet.size && !featureSet.size) typeSet.add('house');
   if (typeSet.size) result.propertyTypeKeywords = Array.from(typeSet);
 
   // --- Residual keyword ---
@@ -614,11 +704,16 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   residual = residual.replace(BEDS_PLUS_REGEX, ' ').replace(BATHS_PLUS_REGEX, ' ');
   residual = residual.replace(BEDS_REGEX, ' ').replace(BATHS_REGEX, ' ');
   residual = residual.replace(STUDIO_REGEX, ' ');
-  residual = residual.replace(PRICE_UNDER_REGEX, ' ').replace(PRICE_OVER_REGEX, ' ');
-  residual = residual.replace(PRICE_RANGE_REGEX, ' ');
+  // Area before price so "between 75 and 120 square meters" is not stripped to leftover "square meters"
   residual = residual.replace(AREA_MIN_REGEX, ' ').replace(AREA_MAX_REGEX, ' ');
   residual = residual.replace(AREA_RANGE_REGEX, ' ').replace(AREA_BARE_RANGE_REGEX, ' ');
+  residual = residual.replace(PRICE_UNDER_REGEX, ' ').replace(PRICE_OVER_REGEX, ' ');
+  residual = residual.replace(PRICE_RANGE_REGEX, ' ');
   residual = residual.replace(IN_PLACE_REGEX, ' ');
+  residual = residual.replace(
+    /\b(?:sqm|sq\.?\s*m|m2|square\s*met(?:er|re)s?)\b/gi,
+    ' '
+  );
   for (const key of Object.keys(WORD_AMOUNT_MAP).sort((a, b) => b.length - a.length)) {
     residual = residual.replace(new RegExp(`\\b${key.replace(/\s+/g, '\\s+')}\\b`, 'gi'), ' ');
   }
@@ -725,7 +820,14 @@ export function mergeStructuredNaturalLanguageIntoState(
     state.completionStatus = nl.completionStatus;
   }
   if (nl.sortBy && !state.sortBy) state.sortBy = nl.sortBy;
-  mergePropertyTypeKeywordsIntoState(state, nl.propertyTypeKeywords, resolved?.propertyTypeIds);
+  // Generic "house" + amenities: prefer amenity keywords (filter-style) over narrow type IDs
+  const typeKeys =
+    nl.featureKeys?.length &&
+    nl.propertyTypeKeywords?.length === 1 &&
+    nl.propertyTypeKeywords[0] === 'house'
+      ? undefined
+      : nl.propertyTypeKeywords;
+  mergePropertyTypeKeywordsIntoState(state, typeKeys, typeKeys ? resolved?.propertyTypeIds : undefined);
   if (
     nl.mainPropertyTypeKeywords?.length &&
     state.mainPropertyTypeIds == null &&
@@ -733,13 +835,11 @@ export function mergeStructuredNaturalLanguageIntoState(
   ) {
     state.mainPropertyTypeIds = resolved.mainPropertyTypeIds;
   }
-  // Amenity words → keyword chips (KEYWORDS / full-text). Prefer feature_ids only when DB resolved.
-  // Catalog amenities (golf, beach, marina) are keyword-based; Typesense `features` keys often differ.
+  // Amenity words → same keyword chips as filter UI (KEYWORDS / full-text).
+  // Do not prefer feature_ids here — catalog amenities like garden/golf/pool are keyword-based.
   if (nl.featureKeys?.length) {
-    if (state.featureIds == null && resolved?.featureIds?.length) {
-      state.featureIds = resolved.featureIds;
-    } else {
-      const mapped = nl.featureKeys.map((k) => (k === 'beachfront' ? 'beach' : k));
+    const mapped = amenityKeysToKeywords(nl.featureKeys);
+    if (mapped.length) {
       state.keywords = [...new Set([...(state.keywords ?? []), ...mapped])];
     }
   }

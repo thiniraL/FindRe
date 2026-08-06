@@ -67,7 +67,7 @@ const TYPE_GROUP_MATCHERS: Record<string, string[]> = {
   townhouse: ['townhouse', 'town_house', 'town house'],
   bungalow: ['bungalow'],
   studio: ['studio'],
-  house: ['house', 'chalet', 'quad'],
+  house: ['house', 'chalet', 'quad', 'villa', 'bungalow', 'townhouse', 'town_house', 'semi'],
   duplex: ['duplex'],
   semi: ['semi', 'semidetached', 'semi_detached'],
   land: ['land', 'plot'],
