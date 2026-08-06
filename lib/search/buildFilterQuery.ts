@@ -39,6 +39,13 @@ export type SearchFilterState = {
   agentIds?: { id: number; type: 'agency' | 'agent' }[];
   /** Feature IDs from PROPERTY_DETAILS.feature_ids */
   featureIds?: number[];
+  /**
+   * Feature keys from Typesense `features` facet (e.g. golf, beachfront).
+   * Used when NL maps amenity words without resolving numeric IDs yet.
+   */
+  featureKeys?: string[];
+  /** Override default sort (e.g. price:asc for "cheapest"). */
+  sortBy?: string;
 };
 
 function escapeFilterValue(value: string): string {
@@ -146,6 +153,9 @@ export function buildFilterBy(state: SearchFilterState): string | undefined {
   }
   if (state.featureIds?.length) {
     parts.push(`feature_ids:=[${state.featureIds.join(',')}]`);
+  } else if (state.featureKeys?.length) {
+    const keys = state.featureKeys.map((k) => escapeFilterValue(k));
+    parts.push(`features:=[${keys.join(',')}]`);
   }
 
   if (parts.length === 0) return undefined;

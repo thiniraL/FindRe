@@ -62,13 +62,14 @@ export async function runSearchCount(
 
   if (!useNl && needsKeywordOrSearch(state)) {
     const qs = buildKeywordOrQueries(state);
+    const sortBy = state.sortBy?.trim() || 'updated_at:desc';
     const resp = await typesenseMultiSearchUnion<{ property_id: string }>(
       qs.map((q) => ({
         collection: 'properties',
         q,
         queryBy: PROPERTIES_QUERY_BY,
         filterBy: filterBy ?? undefined,
-        sortBy: 'updated_at:desc',
+        sortBy,
         page: 1,
         perPage: 0,
       }))
@@ -77,13 +78,14 @@ export async function runSearchCount(
   }
 
   const q = useNl ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '') : buildSearchQuery(state);
+  const sortBy = useNl ? undefined : state.sortBy?.trim() || 'updated_at:desc';
 
   const resp = await typesenseSearch<{ property_id: string }>({
     collection: 'properties',
     q,
     queryBy: PROPERTIES_QUERY_BY,
     filterBy: filterBy ?? undefined,
-    sortBy: useNl ? undefined : 'updated_at:desc',
+    sortBy,
     page: 1,
     perPage: 0,
     ...(useNl && {

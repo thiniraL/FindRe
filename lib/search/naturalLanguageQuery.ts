@@ -5,6 +5,11 @@
  */
 
 import type { SearchFilterState } from './buildFilterQuery';
+import {
+  resolveFeatureIdsFromKeys,
+  resolveMainPropertyTypeIdsFromKeywords,
+  resolvePropertyTypeIdsFromKeywords,
+} from './nlDbMaps';
 
 export type NaturalLanguageMapped = {
   location?: string;
@@ -25,6 +30,8 @@ export type NaturalLanguageMapped = {
   mainPropertyTypeKeywords?: string[];
   /** Completion: ready | off_plan */
   completionStatus?: string;
+  /** Typesense sort_by override (e.g. price:asc for "cheapest") */
+  sortBy?: string;
 };
 
 /** Feature words/phrases → config value (e.g. pool, garden, ac) */
@@ -558,10 +565,17 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   }
 
   // --- Completion / new build ---
-  if (/\b(?:newly\s+built|new\s+build|off[-\s]?plan|under\s+construction)\b/i.test(text)) {
+  // Only explicit off-plan / under construction → completion filter.
+  // "newly built" / "new build" is not mapped to completion_status (catalog values vary / often empty).
+  if (/\b(?:off[-\s]?plan|under\s+construction)\b/i.test(text)) {
     result.completionStatus = 'off_plan';
   } else if (/\b(?:ready|completed|resale)\b/i.test(text)) {
     result.completionStatus = 'ready';
+  }
+
+  // --- Sort: cheapest / lowest price ---
+  if (/\b(?:cheapest|lowest\s+price|least\s+expensive|lowest\s+priced)\b/i.test(text)) {
+    result.sortBy = 'price:asc';
   }
 
   // --- Main type: residential / commercial ---
@@ -589,7 +603,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
       typeScan = typeScan.replace(re, ' ');
     }
   }
-  // "homes" → house
+  // "homes" / "home" → house
   if (/\bhomes?\b/i.test(text) && !typeSet.size) typeSet.add('house');
   if (typeSet.size) result.propertyTypeKeywords = Array.from(typeSet);
 
@@ -611,7 +625,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   residual = residual.replace(/\b(?:under|below|between|above|over|at\s+least|more\s+than|less\s+than|close\s+to)\b/gi, ' ');
   residual = residual.replace(/\b(?:euros|euro|eur|usd)\b/gi, ' ');
   residual = residual.replace(/[€$£]/g, ' ');
-  residual = residual.replace(/\b(?:newly\s+built|new\s+build|off[-\s]?plan|ready|completed|resale|residential|commercial|modern|cheapest)\b/gi, ' ');
+  residual = residual.replace(/\b(?:newly\s+built|new\s+build|off[-\s]?plan|under\s+construction|ready|completed|resale|residential|commercial|modern|cheapest|lowest\s+price|least\s+expensive)\b/gi, ' ');
   for (const key of Object.keys(FEATURE_MAP).sort((a, b) => b.length - a.length)) {
     residual = residual.replace(
       new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'gi'),
@@ -624,6 +638,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
       ' '
     );
   }
+  residual = residual.replace(/\bhomes?\b/gi, ' ');
   for (const key of PURPOSE_PHRASES) {
     residual = residual.replace(new RegExp(`\\b${key.replace(/\s+/g, '\\s+')}\\b`, 'gi'), ' ');
   }
@@ -651,12 +666,39 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
 
 function mergePropertyTypeKeywordsIntoState(
   state: Partial<SearchFilterState>,
-  keywords: string[] | undefined
+  keywords: string[] | undefined,
+  resolvedIds?: number[]
 ): void {
-  if (!keywords?.length || state.propertyTypeIds != null) return;
+  if (state.propertyTypeIds != null) return;
+  if (resolvedIds?.length) {
+    state.propertyTypeIds = resolvedIds;
+    return;
+  }
+  if (!keywords?.length) return;
   const ids = keywords.flatMap((k) => PROPERTY_TYPE_KEY_TO_IDS[k] ?? []);
   const unique = [...new Set(ids.filter((id) => Number.isFinite(id)))];
   if (unique.length) state.propertyTypeIds = unique;
+}
+
+/**
+ * True when rule parser extracted enough structured filters that Typesense NL
+ * should be skipped (avoids rule filter_by AND LLM filters → 0 hits).
+ */
+export function hasStructuredNaturalLanguageHints(nl: NaturalLanguageMapped): boolean {
+  return !!(
+    nl.bedrooms?.length ||
+    nl.bathrooms?.length ||
+    nl.priceMin != null ||
+    nl.priceMax != null ||
+    nl.areaMin != null ||
+    nl.areaMax != null ||
+    nl.propertyTypeKeywords?.length ||
+    nl.mainPropertyTypeKeywords?.length ||
+    nl.featureKeys?.length ||
+    nl.completionStatus ||
+    nl.location ||
+    nl.sortBy
+  );
 }
 
 /**
@@ -665,7 +707,12 @@ function mergePropertyTypeKeywordsIntoState(
  */
 export function mergeStructuredNaturalLanguageIntoState(
   state: Partial<SearchFilterState> & { purpose: string },
-  nl: NaturalLanguageMapped
+  nl: NaturalLanguageMapped,
+  resolved?: {
+    propertyTypeIds?: number[];
+    featureIds?: number[];
+    mainPropertyTypeIds?: number[];
+  }
 ): void {
   if (nl.purpose && !state.purpose?.trim()) state.purpose = nl.purpose;
   if (nl.bedrooms?.length && state.bedrooms == null) state.bedrooms = nl.bedrooms;
@@ -677,11 +724,24 @@ export function mergeStructuredNaturalLanguageIntoState(
   if (nl.completionStatus && !state.completionStatus && !state.completionStatuses?.length) {
     state.completionStatus = nl.completionStatus;
   }
-  mergePropertyTypeKeywordsIntoState(state, nl.propertyTypeKeywords);
-  // Feature / amenity words → full-text keywords (OR multi-search when multiple)
+  if (nl.sortBy && !state.sortBy) state.sortBy = nl.sortBy;
+  mergePropertyTypeKeywordsIntoState(state, nl.propertyTypeKeywords, resolved?.propertyTypeIds);
+  if (
+    nl.mainPropertyTypeKeywords?.length &&
+    state.mainPropertyTypeIds == null &&
+    resolved?.mainPropertyTypeIds?.length
+  ) {
+    state.mainPropertyTypeIds = resolved.mainPropertyTypeIds;
+  }
+  // Amenity words → keyword chips (KEYWORDS / full-text). Prefer feature_ids only when DB resolved.
+  // Catalog amenities (golf, beach, marina) are keyword-based; Typesense `features` keys often differ.
   if (nl.featureKeys?.length) {
-    const extra = nl.featureKeys;
-    state.keywords = [...new Set([...(state.keywords ?? []), ...extra])];
+    if (state.featureIds == null && resolved?.featureIds?.length) {
+      state.featureIds = resolved.featureIds;
+    } else {
+      const mapped = nl.featureKeys.map((k) => (k === 'beachfront' ? 'beach' : k));
+      state.keywords = [...new Set([...(state.keywords ?? []), ...mapped])];
+    }
   }
 }
 
@@ -690,13 +750,18 @@ export function mergeStructuredNaturalLanguageIntoState(
  */
 export function mergeNaturalLanguageIntoState(
   state: Partial<SearchFilterState> & { purpose: string },
-  nl: NaturalLanguageMapped
+  nl: NaturalLanguageMapped,
+  resolved?: {
+    propertyTypeIds?: number[];
+    featureIds?: number[];
+    mainPropertyTypeIds?: number[];
+  }
 ): void {
   if (nl.location != null && state.location == null) state.location = nl.location;
   if (nl.keyword != null) {
     state.keyword = state.keyword ? `${state.keyword} ${nl.keyword}` : nl.keyword;
   }
-  mergeStructuredNaturalLanguageIntoState(state, nl);
+  mergeStructuredNaturalLanguageIntoState(state, nl, resolved);
 }
 
 /**
@@ -713,32 +778,61 @@ export function getTypesenseNlQuery(rawQ: string): string {
  * nl_query=true only when:
  *   - TYPESENSE_NL_MODEL_ID is set, AND
  *   - q is non-empty (has data), AND
- *   - caller did not opt out with nl_query=false
+ *   - caller did not opt out with nl_query=false, AND
+ *   - rule parser did not already extract structured filters (avoid dual AND)
  * No q / empty q → normal search (no nl_query / nl_model_id).
  */
 export function resolveNaturalLanguageSearchMode(
   q: string | undefined,
   nlModelId: string | undefined,
-  nlQueryOptOut: boolean
+  nlQueryOptOut: boolean,
+  options?: { hasStructuredHints?: boolean }
 ): { qValue: string; willUseNl: boolean } {
   const qValue = q?.trim() || '';
-  const willUseNl = !!nlModelId && !!qValue && !nlQueryOptOut;
+  const willUseNl =
+    !!nlModelId && !!qValue && !nlQueryOptOut && !options?.hasStructuredHints;
   return { qValue, willUseNl };
+}
+
+async function resolveNlDbIds(nl: NaturalLanguageMapped): Promise<{
+  propertyTypeIds?: number[];
+  featureIds?: number[];
+  mainPropertyTypeIds?: number[];
+}> {
+  const [propertyTypeIds, featureIds, mainPropertyTypeIds] = await Promise.all([
+    nl.propertyTypeKeywords?.length
+      ? resolvePropertyTypeIdsFromKeywords(nl.propertyTypeKeywords)
+      : Promise.resolve([] as number[]),
+    nl.featureKeys?.length
+      ? resolveFeatureIdsFromKeys(nl.featureKeys)
+      : Promise.resolve([] as number[]),
+    nl.mainPropertyTypeKeywords?.length
+      ? resolveMainPropertyTypeIdsFromKeywords(nl.mainPropertyTypeKeywords)
+      : Promise.resolve([] as number[]),
+  ]);
+  return {
+    propertyTypeIds: propertyTypeIds.length ? propertyTypeIds : undefined,
+    featureIds: featureIds.length ? featureIds : undefined,
+    mainPropertyTypeIds: mainPropertyTypeIds.length ? mainPropertyTypeIds : undefined,
+  };
 }
 
 /**
  * Apply rule-based NL parsing to q. When structuredOnly is true (Typesense NL mode),
  * only beds/baths/price/property type/purpose are merged; location and keyword stay with the LLM.
+ * Resolves type/feature IDs from DB when available (falls back to static maps / feature keys).
  */
-export function applyNaturalLanguageQuery(
+export async function applyNaturalLanguageQuery(
   state: Partial<SearchFilterState> & { purpose: string },
   q: string,
   options: { structuredOnly: boolean }
-): void {
+): Promise<NaturalLanguageMapped> {
   const nl = parseNaturalLanguageQuery(q);
+  const resolved = await resolveNlDbIds(nl);
   if (options.structuredOnly) {
-    mergeStructuredNaturalLanguageIntoState(state, nl);
+    mergeStructuredNaturalLanguageIntoState(state, nl, resolved);
   } else {
-    mergeNaturalLanguageIntoState(state, nl);
+    mergeNaturalLanguageIntoState(state, nl, resolved);
   }
+  return nl;
 }

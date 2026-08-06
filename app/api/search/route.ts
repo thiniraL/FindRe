@@ -15,6 +15,8 @@ import {
 import {
   applyNaturalLanguageQuery,
   getTypesenseNlQuery,
+  hasStructuredNaturalLanguageHints,
+  parseNaturalLanguageQuery,
   resolveNaturalLanguageSearchMode,
   PURPOSE_WORDS_SET,
   SEARCH_STOPWORDS,
@@ -27,11 +29,10 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Search pipeline:
- *   nl_query=true + nl_model_id only when q is non-empty and TYPESENSE_NL_MODEL_ID is set.
+ *   Prefer rule-based parse when q yields structured filters (beds/price/type/…).
+ *   Typesense NL (nl_query + nl_model_id) only when q is non-empty, model is set,
+ *   caller did not opt out, AND rules extracted little/nothing — avoids dual AND → 0 hits.
  *   Empty/missing q → normal Typesense search (no NL params).
- *   Explicit nl_query=false opts out even when q is set.
- *   Rule-based parse still merges beds/baths/price/purpose/property type into filter_by
- *     as a reliability assist alongside the LLM when NL is on.
  */
 
 const DEFAULT_COUNTRY_ID = 1;
@@ -171,16 +172,19 @@ export async function GET(request: NextRequest) {
       featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
 
-    // Non-empty q → Typesense NL (nl_query=true). Explicit nl_query=false opts out.
+    // Prefer rules when they extract structure; Typesense NL only for residual free text.
     const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
+    const qRaw = parsed.q?.trim() || '';
+    const structuredHints = qRaw ? hasStructuredNaturalLanguageHints(parseNaturalLanguageQuery(qRaw)) : false;
     const { qValue, willUseNl } = resolveNaturalLanguageSearchMode(
       parsed.q,
       nlModelId,
-      parsed.nl_query === false
+      parsed.nl_query === false,
+      { hasStructuredHints: structuredHints }
     );
 
     if (qValue) {
-      applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
+      await applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
     }
 
     // Default purpose only for non-NL search. NL lets the model set purpose_key (e.g. for_rent).
@@ -241,13 +245,14 @@ async function runSearch(
   // Multiple keyword chips → OR via multi-search union (skip NL for this path)
   if (!useNl && needsKeywordOrSearch(filterState)) {
     const qs = buildKeywordOrQueries(filterState);
+    const sortBy = filterState.sortBy?.trim() || 'updated_at:desc';
     const resp = await typesenseMultiSearchUnion<TypesensePropertyDoc>(
       qs.map((q) => ({
         collection: 'properties',
         q,
         queryBy: PROPERTIES_QUERY_BY,
         filterBy: filterBy ?? undefined,
-        sortBy: 'updated_at:desc',
+        sortBy,
         page,
         perPage,
       }))
@@ -260,13 +265,16 @@ async function runSearch(
     ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '')
     : buildSearchQuery(filterState);
 
+  const sortBy = useNl
+    ? undefined
+    : filterState.sortBy?.trim() || 'updated_at:desc';
+
   const resp = await typesenseSearch<TypesensePropertyDoc>({
     collection: 'properties',
     q,
     queryBy: PROPERTIES_QUERY_BY,
     filterBy: filterBy ?? undefined,
-    // When NL is on, omit sort_by so LLM can apply "cheapest first" etc.
-    sortBy: useNl ? undefined : 'updated_at:desc',
+    sortBy,
     page,
     perPage,
     ...(useNl && {
@@ -367,14 +375,17 @@ export async function POST(request: NextRequest) {
     };
 
     const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
+    const qRaw = body.q?.trim() || '';
+    const structuredHints = qRaw ? hasStructuredNaturalLanguageHints(parseNaturalLanguageQuery(qRaw)) : false;
     const { qValue, willUseNl } = resolveNaturalLanguageSearchMode(
       body.q,
       nlModelId,
-      body.nl_query === false
+      body.nl_query === false,
+      { hasStructuredHints: structuredHints }
     );
 
     if (qValue) {
-      applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
+      await applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
     }
     if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';
