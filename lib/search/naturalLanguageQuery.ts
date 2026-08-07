@@ -549,8 +549,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
   const purpose = inferPurpose(lower);
   if (purpose) result.purpose = purpose;
 
-  // --- Beds / baths: "at least N" / "N or more" first (plus), then exact ---
-  // Conversational "4 bedrooms" / "2 bathrooms" → N+ (customer usually means at least N)
+  // --- Beds / baths: "at least N" / "N or more" → N+; plain "N bedroom(s)" → exact N (match filter chips / QA) ---
   BEDS_PLUS_REGEX.lastIndex = 0;
   const bedsPlus = BEDS_PLUS_REGEX.exec(text);
   if (bedsPlus) {
@@ -561,7 +560,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
     const bedMatch = BEDS_REGEX.exec(text);
     if (bedMatch) {
       const n = parseCountToken(bedMatch[1]);
-      if (n != null) result.bedrooms = [`${n}+`];
+      if (n != null) result.bedrooms = [n];
     }
   }
   if (STUDIO_REGEX.test(text) && result.bedrooms == null) {
@@ -578,7 +577,7 @@ export function parseNaturalLanguageQuery(query: string): NaturalLanguageMapped 
     const bathMatch = BATHS_REGEX.exec(text);
     if (bathMatch) {
       const n = parseCountToken(bathMatch[1]);
-      if (n != null && n >= 1) result.bathrooms = [`${n}+`];
+      if (n != null && n >= 1) result.bathrooms = [n];
     }
   }
 
@@ -828,15 +827,10 @@ export function mergeStructuredNaturalLanguageIntoState(
       ? undefined
       : nl.propertyTypeKeywords;
   mergePropertyTypeKeywordsIntoState(state, typeKeys, typeKeys ? resolved?.propertyTypeIds : undefined);
-  if (
-    nl.mainPropertyTypeKeywords?.length &&
-    state.mainPropertyTypeIds == null &&
-    resolved?.mainPropertyTypeIds?.length
-  ) {
-    state.mainPropertyTypeIds = resolved.mainPropertyTypeIds;
-  }
+  // Do not apply residential/commercial mainPropertyTypeIds — Typesense main_property_type_ids
+  // is unmapped/empty on docs; filter UI also cannot constrain by main alone. Subtypes
+  // (apartment, villa, bungalow) still apply via propertyTypeIds.
   // Amenity words → same keyword chips as filter UI (KEYWORDS / full-text).
-  // Do not prefer feature_ids here — catalog amenities like garden/golf/pool are keyword-based.
   if (nl.featureKeys?.length) {
     const mapped = amenityKeysToKeywords(nl.featureKeys);
     if (mapped.length) {
