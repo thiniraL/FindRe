@@ -5,12 +5,7 @@
 
 import { query } from '@/lib/db/client';
 
-type TypeRow = {
-  type_id: number;
-  type_key: string;
-  name_en: string;
-  main_property_type_ids: number[] | null;
-};
+type TypeRow = { type_id: number; type_key: string; name_en: string };
 type FeatureRow = { feature_id: number; feature_key: string };
 type MainTypeRow = { main_type_id: number; main_type_key: string };
 
@@ -28,8 +23,7 @@ async function loadPropertyTypes(): Promise<TypeRow[]> {
     SELECT
       type_id,
       lower(type_key) AS type_key,
-      lower(COALESCE(name_translations->>'en', type_key)) AS name_en,
-      main_property_type_ids
+      lower(COALESCE(name_translations->>'en', type_key)) AS name_en
     FROM property.PROPERTY_TYPES
     `
   );
@@ -141,7 +135,7 @@ export async function resolveMainPropertyTypeIdsFromKeywords(
     for (const kw of keywords) {
       const k = kw.toLowerCase();
       for (const row of rows) {
-        if (row.main_type_key === k || row.main_type_key.includes(k) || k.includes(row.main_type_key)) {
+        if (row.main_type_key === k || row.main_type_key.includes(k)) {
           ids.push(row.main_type_id);
         }
       }
@@ -149,43 +143,5 @@ export async function resolveMainPropertyTypeIdsFromKeywords(
     return [...new Set(ids)];
   } catch {
     return [];
-  }
-}
-
-/**
- * Property type IDs that belong to residential / commercial (same nesting as filter chips).
- * Prefer this over Typesense main_property_type_ids — that field is often empty on docs.
- */
-const STATIC_MAIN_TO_TYPE_IDS: Record<string, number[]> = {
-  // Dwelling types present in Typesense facets / PROPERTY_TYPE_KEY_TO_IDS
-  residential: [
-    26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 45, 46, 47, 48, 49, 50, 51,
-    52, 53, 54, 55, 56, 57, 58,
-  ],
-  // Land/plot — only commercial-leaning types currently indexed; expand when more exist
-  commercial: [43, 44],
-};
-
-export async function resolvePropertyTypeIdsForMainKeywords(
-  keywords: string[]
-): Promise<number[]> {
-  if (!keywords.length) return [];
-  const staticIds = [
-    ...new Set(
-      keywords.flatMap((kw) => STATIC_MAIN_TO_TYPE_IDS[kw.toLowerCase()] ?? [])
-    ),
-  ];
-  try {
-    const mainIds = await resolveMainPropertyTypeIdsFromKeywords(keywords);
-    if (!mainIds.length) return staticIds;
-    const rows = await loadPropertyTypes();
-    const ids: number[] = [];
-    for (const row of rows) {
-      const mains = row.main_property_type_ids ?? [];
-      if (mains.some((m) => mainIds.includes(m))) ids.push(row.type_id);
-    }
-    return ids.length ? [...new Set(ids)] : staticIds;
-  } catch {
-    return staticIds;
   }
 }
