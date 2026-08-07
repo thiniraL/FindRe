@@ -8,6 +8,7 @@ import type { SearchFilterState } from './buildFilterQuery';
 import {
   resolveFeatureIdsFromKeys,
   resolveMainPropertyTypeIdsFromKeywords,
+  resolvePropertyTypeIdsForMainKeywords,
   resolvePropertyTypeIdsFromKeywords,
 } from './nlDbMaps';
 
@@ -807,6 +808,7 @@ export function mergeStructuredNaturalLanguageIntoState(
     propertyTypeIds?: number[];
     featureIds?: number[];
     mainPropertyTypeIds?: number[];
+    propertyTypeIdsFromMain?: number[];
   }
 ): void {
   if (nl.purpose && !state.purpose?.trim()) state.purpose = nl.purpose;
@@ -828,13 +830,9 @@ export function mergeStructuredNaturalLanguageIntoState(
       ? undefined
       : nl.propertyTypeKeywords;
   mergePropertyTypeKeywordsIntoState(state, typeKeys, typeKeys ? resolved?.propertyTypeIds : undefined);
-  if (
-    nl.mainPropertyTypeKeywords?.length &&
-    state.mainPropertyTypeIds == null &&
-    resolved?.mainPropertyTypeIds?.length
-  ) {
-    state.mainPropertyTypeIds = resolved.mainPropertyTypeIds;
-  }
+  // residential / commercial: NOT applied as filters.
+  // Typesense docs have empty main_property_type_ids (unmapped) — same as filter when main
+  // chip isn't backed by data. Subtypes like "apartments" / "villa" still filter via propertyTypeIds.
   // Amenity words → same keyword chips as filter UI (KEYWORDS / full-text).
   // Do not prefer feature_ids here — catalog amenities like garden/golf/pool are keyword-based.
   if (nl.featureKeys?.length) {
@@ -855,6 +853,7 @@ export function mergeNaturalLanguageIntoState(
     propertyTypeIds?: number[];
     featureIds?: number[];
     mainPropertyTypeIds?: number[];
+    propertyTypeIdsFromMain?: number[];
   }
 ): void {
   if (nl.location != null && state.location == null) state.location = nl.location;
@@ -898,22 +897,30 @@ async function resolveNlDbIds(nl: NaturalLanguageMapped): Promise<{
   propertyTypeIds?: number[];
   featureIds?: number[];
   mainPropertyTypeIds?: number[];
+  propertyTypeIdsFromMain?: number[];
 }> {
-  const [propertyTypeIds, featureIds, mainPropertyTypeIds] = await Promise.all([
-    nl.propertyTypeKeywords?.length
-      ? resolvePropertyTypeIdsFromKeywords(nl.propertyTypeKeywords)
-      : Promise.resolve([] as number[]),
-    nl.featureKeys?.length
-      ? resolveFeatureIdsFromKeys(nl.featureKeys)
-      : Promise.resolve([] as number[]),
-    nl.mainPropertyTypeKeywords?.length
-      ? resolveMainPropertyTypeIdsFromKeywords(nl.mainPropertyTypeKeywords)
-      : Promise.resolve([] as number[]),
-  ]);
+  const [propertyTypeIds, featureIds, mainPropertyTypeIds, propertyTypeIdsFromMain] =
+    await Promise.all([
+      nl.propertyTypeKeywords?.length
+        ? resolvePropertyTypeIdsFromKeywords(nl.propertyTypeKeywords)
+        : Promise.resolve([] as number[]),
+      nl.featureKeys?.length
+        ? resolveFeatureIdsFromKeys(nl.featureKeys)
+        : Promise.resolve([] as number[]),
+      nl.mainPropertyTypeKeywords?.length
+        ? resolveMainPropertyTypeIdsFromKeywords(nl.mainPropertyTypeKeywords)
+        : Promise.resolve([] as number[]),
+      nl.mainPropertyTypeKeywords?.length
+        ? resolvePropertyTypeIdsForMainKeywords(nl.mainPropertyTypeKeywords)
+        : Promise.resolve([] as number[]),
+    ]);
   return {
     propertyTypeIds: propertyTypeIds.length ? propertyTypeIds : undefined,
     featureIds: featureIds.length ? featureIds : undefined,
     mainPropertyTypeIds: mainPropertyTypeIds.length ? mainPropertyTypeIds : undefined,
+    propertyTypeIdsFromMain: propertyTypeIdsFromMain.length
+      ? propertyTypeIdsFromMain
+      : undefined,
   };
 }
 
