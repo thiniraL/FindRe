@@ -43,12 +43,22 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'property_type_en', type: 'string', optional: true },
     { name: 'property_type_names_en', type: 'string[]', optional: true },
     { name: 'main_property_type_ids', type: 'int32[]', facet: true, optional: true },
+    { name: 'main_property_type_keys', type: 'string[]', facet: true, optional: true },
+    { name: 'main_property_type_names_en', type: 'string[]', optional: true },
     { name: 'price', type: 'float', facet: true, optional: true },
+    { name: 'price_str', type: 'string', optional: true },
     { name: 'currency_id', type: 'int32', facet: true, optional: true },
+    { name: 'currency_code', type: 'string', facet: true, optional: true },
+    { name: 'currency_en', type: 'string', optional: true },
+    { name: 'currency_symbol', type: 'string', optional: true },
     { name: 'bedrooms', type: 'int32', facet: true, optional: true },
+    { name: 'bedrooms_str', type: 'string', optional: true },
     { name: 'bathrooms', type: 'int32', facet: true, optional: true },
+    { name: 'bathrooms_str', type: 'string', optional: true },
     { name: 'area_sqft', type: 'float', facet: true, optional: true },
+    { name: 'area_sqft_str', type: 'string', optional: true },
     { name: 'area_sqm', type: 'float', facet: true, optional: true },
+    { name: 'area_sqm_str', type: 'string', optional: true },
     // Location search uses address text
     { name: 'address', type: 'string', optional: true },
     // Feature IDs (filter by feature_ids); display keys in features
@@ -87,6 +97,45 @@ function mustGetEnv(key: string): string {
   const v = Deno.env.get(key);
   if (!v || !v.trim()) throw new Error(`Missing env: ${key}`);
   return v.trim();
+}
+
+/** String mirrors for NL query_by (Typesense query_by cannot use int/float). */
+function bedroomsStr(n: number | null | undefined): string | null {
+  if (n == null || !Number.isFinite(Number(n))) return null;
+  const v = Number(n);
+  if (v === 0) return '0 studio 0 bedroom 0 bedrooms 0 bed';
+  return `${v} ${v} bedroom ${v} bedrooms ${v} bed`;
+}
+
+function bathroomsStr(n: number | null | undefined): string | null {
+  if (n == null || !Number.isFinite(Number(n))) return null;
+  const v = Number(n);
+  return `${v} ${v} bathroom ${v} bathrooms ${v} bath`;
+}
+
+function areaSqmStr(n: number | null | undefined): string | null {
+  if (n == null || !Number.isFinite(Number(n))) return null;
+  const v = Number(n);
+  const rounded = Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
+  return `${rounded} ${rounded} sqm ${rounded} square meters ${rounded} m2`;
+}
+
+function areaSqftStr(n: number | null | undefined): string | null {
+  if (n == null || !Number.isFinite(Number(n))) return null;
+  const v = Number(n);
+  const rounded = Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
+  return `${rounded} ${rounded} sqft ${rounded} square feet`;
+}
+
+function priceStr(
+  price: number | null | undefined,
+  currencyCode: string | null | undefined
+): string | null {
+  if (price == null || !Number.isFinite(Number(price))) return null;
+  const v = Number(price);
+  const num = Number.isInteger(v) ? String(v) : String(v);
+  const code = currencyCode?.trim();
+  return code ? `${num} ${num} ${code}` : num;
 }
 
 function getTypesenseBaseUrl(): string {
@@ -223,12 +272,22 @@ type PropertyDoc = {
   property_type_en: string | null;
   property_type_names_en: string[] | null;
   main_property_type_ids: number[] | null;
+  main_property_type_keys: string[] | null;
+  main_property_type_names_en: string[] | null;
   price: number | null;
+  price_str: string | null;
   currency_id: number | null;
+  currency_code: string | null;
+  currency_en: string | null;
+  currency_symbol: string | null;
   bedrooms: number | null;
+  bedrooms_str: string | null;
   bathrooms: number | null;
+  bathrooms_str: string | null;
   area_sqft: number | null;
+  area_sqft_str: string | null;
   area_sqm: number | null;
+  area_sqm_str: string | null;
   address: string | null;
   feature_ids: number[] | null;
   features: string[] | null;
@@ -302,20 +361,22 @@ async function importDocs(docs: PropertyDoc[]): Promise<void> {
 async function deleteDocs(ids: string[]): Promise<void> {
   if (!ids.length) return;
   await ensureCollection(PROPERTIES_COLLECTION_SCHEMA);
-  const body = ids.map((id) => JSON.stringify({ id })).join('\n');
-  const res = await tsFetch(
-    `/collections/properties/documents/import?action=delete`,
-    { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body }
-  );
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Typesense delete import error (${res.status}) ${text}`);
-  }
-  const resultText = await res.text();
-  const lines = resultText.split('\n').filter(Boolean);
-  const failures = lines.filter((line) => (JSON.parse(line) as { success?: boolean }).success === false);
-  if (failures.length > 0) {
-    console.error(`Typesense delete had ${failures.length} failures`);
+
+  // Older Typesense builds reject import?action=delete — use delete-by-filter instead.
+  const chunkSize = 100;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const filterBy = `id:[${chunk.join(',')}]`;
+    const res = await tsFetch(
+      `/collections/properties/documents?filter_by=${encodeURIComponent(filterBy)}&batch_size=${chunk.length}`,
+      { method: 'DELETE' }
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      // Ignore not-found style failures for already-missing docs when possible
+      if (res.status === 404) continue;
+      throw new Error(`Typesense delete error (${res.status}) ${text}`);
+    }
   }
 }
 
@@ -373,6 +434,7 @@ serve(async (req) => {
 
     while (true) {
       let docs: PropertyDoc[] = [];
+      let toDelete: string[] = [];
       const client = await pool.connect();
       try {
         // Location: property.address only; LOCATIONS optional (country_id default 1 when null).
@@ -389,8 +451,13 @@ serve(async (req) => {
           property_type_en: string | null;
           property_type_names_en: string[] | null;
           main_property_type_ids: number[] | null;
+          main_property_type_keys: string[] | null;
+          main_property_type_names_en: string[] | null;
           price: number | null;
           currency_id: number | null;
+          currency_code: string | null;
+          currency_en: string | null;
+          currency_symbol: string | null;
           bedrooms: number | null;
           bathrooms: number | null;
           area_sqft: number | null;
@@ -440,8 +507,13 @@ serve(async (req) => {
               pt_primary.name_translations->>'en' AS property_type_en,
               pt_all.property_type_keys,
               pt_all.property_type_names_en,
+              mpt_all.main_property_type_keys,
+              mpt_all.main_property_type_names_en,
               p.price,
               p.currency_id,
+              cur.currency_code,
+              COALESCE(cur.name_translations->>'en', cur.currency_code) AS currency_en,
+              cur.currency_symbol,
               pd.bedrooms,
               pd.bathrooms,
               pd.area_sqft,
@@ -480,6 +552,7 @@ serve(async (req) => {
             LEFT JOIN property.LOCATIONS l ON l.location_id = p.location_id
             LEFT JOIN property.PROPERTY_DETAILS pd ON pd.property_id = p.property_id
             LEFT JOIN property.PURPOSES pur ON pur.purpose_id = p.purpose_id
+            LEFT JOIN master.CURRENCIES cur ON cur.currency_id = p.currency_id
             LEFT JOIN business.AGENTS a ON a.agent_id = p.agent_id
             LEFT JOIN business.AGENCIES ag ON ag.agency_id = a.agency_id
             LEFT JOIN property.PROPERTY_TYPES pt_primary
@@ -491,6 +564,13 @@ serve(async (req) => {
               FROM unnest(COALESCE(p.property_type_ids, '{}')) AS tid
               JOIN property.PROPERTY_TYPES pt ON pt.type_id = tid
             ) pt_all ON TRUE
+            LEFT JOIN LATERAL (
+              SELECT
+                ARRAY_AGG(mpt.main_type_key ORDER BY mpt.main_type_id) AS main_property_type_keys,
+                ARRAY_AGG(COALESCE(mpt.name_translations->>'en', mpt.main_type_key) ORDER BY mpt.main_type_id) AS main_property_type_names_en
+              FROM unnest(COALESCE(p.main_property_type_ids, '{}')) AS mid
+              JOIN property.MAIN_PROPERTY_TYPES mpt ON mpt.main_type_id = mid
+            ) mpt_all ON TRUE
           )
           SELECT
             b.*,
@@ -584,7 +664,6 @@ serve(async (req) => {
 
         const isActive = (s: string | null) =>
           s != null && String(s).trim().toLowerCase() === 'active';
-        const toDelete: string[] = [];
         docs = rows
           .filter((r) => {
             if (!isActive(r.status)) {
@@ -607,6 +686,14 @@ serve(async (req) => {
             const createdAt = Math.floor(new Date(r.created_at).getTime() / 1000);
             const updatedAt =
               typeof r.updated_epoch === 'bigint' ? Number(r.updated_epoch) : r.updated_epoch;
+            const mainPropertyTypeIds =
+              r.main_property_type_ids?.length ? r.main_property_type_ids : [1];
+            const mainPropertyTypeKeys =
+              r.main_property_type_keys?.length ? r.main_property_type_keys : ['residential'];
+            const mainPropertyTypeNamesEn =
+              r.main_property_type_names_en?.length
+                ? r.main_property_type_names_en
+                : ['Residential'];
             return {
               id: String(r.property_id),
               property_id: String(r.property_id),
@@ -619,13 +706,30 @@ serve(async (req) => {
               property_type_keys: r.property_type_keys ?? null,
               property_type_en: r.property_type_en ?? null,
               property_type_names_en: r.property_type_names_en ?? null,
-              main_property_type_ids: r.main_property_type_ids ?? null,
+              main_property_type_ids: mainPropertyTypeIds,
+              main_property_type_keys: mainPropertyTypeKeys,
+              main_property_type_names_en: mainPropertyTypeNamesEn,
               price: r.price !== null ? Number(r.price) : null,
+              price_str: priceStr(
+                r.price !== null ? Number(r.price) : null,
+                r.currency_code
+              ),
               currency_id: r.currency_id,
+              currency_code: r.currency_code ?? null,
+              currency_en: r.currency_en ?? null,
+              currency_symbol: r.currency_symbol ?? null,
               bedrooms: r.bedrooms,
+              bedrooms_str: bedroomsStr(r.bedrooms),
               bathrooms: r.bathrooms,
+              bathrooms_str: bathroomsStr(r.bathrooms),
               area_sqft: r.area_sqft !== null ? Number(r.area_sqft) : null,
+              area_sqft_str: areaSqftStr(
+                r.area_sqft !== null ? Number(r.area_sqft) : null
+              ),
               area_sqm: r.area_sqm !== null ? Number(r.area_sqm) : null,
+              area_sqm_str: areaSqmStr(
+                r.area_sqm !== null ? Number(r.area_sqm) : null
+              ),
               address: r.address,
               feature_ids: r.feature_ids ?? null,
               features: r.features ?? null,

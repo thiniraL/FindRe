@@ -45,6 +45,7 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'country_id', type: 'int32', facet: true },
 
     // Core facets
+    // IDs for filter_by; matching *_key / *_keys / *_en strings for NL / query_by
     { name: 'purpose_id', type: 'int32', facet: true, optional: true },
     { name: 'purpose_key', type: 'string', facet: true, optional: true },
     { name: 'property_type_id', type: 'int32', facet: true, optional: true },
@@ -54,12 +55,22 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'property_type_en', type: 'string', optional: true },
     { name: 'property_type_names_en', type: 'string[]', optional: true },
     { name: 'main_property_type_ids', type: 'int32[]', facet: true, optional: true },
+    { name: 'main_property_type_keys', type: 'string[]', facet: true, optional: true },
+    { name: 'main_property_type_names_en', type: 'string[]', optional: true },
     { name: 'price', type: 'float', facet: true, optional: true },
+    { name: 'price_str', type: 'string', optional: true },
     { name: 'currency_id', type: 'int32', facet: true, optional: true },
+    { name: 'currency_code', type: 'string', facet: true, optional: true },
+    { name: 'currency_en', type: 'string', optional: true },
+    { name: 'currency_symbol', type: 'string', optional: true },
     { name: 'bedrooms', type: 'int32', facet: true, optional: true },
+    { name: 'bedrooms_str', type: 'string', optional: true },
     { name: 'bathrooms', type: 'int32', facet: true, optional: true },
+    { name: 'bathrooms_str', type: 'string', optional: true },
     { name: 'area_sqft', type: 'float', facet: true, optional: true },
+    { name: 'area_sqft_str', type: 'string', optional: true },
     { name: 'area_sqm', type: 'float', facet: true, optional: true },
+    { name: 'area_sqm_str', type: 'string', optional: true },
     // Location search uses `address` (text) instead of location_id filtering
     { name: 'address', type: 'string', optional: true },
     // Feature IDs (filter by feature_ids); keys kept for display if needed
@@ -105,6 +116,10 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
   ],
 };
 
+/**
+ * NL / LLM `query_by` — string / string[] only.
+ * Keep int/float facets for filter_by; *_str mirrors are for text / NL query_by.
+ */
 export const PROPERTIES_QUERY_BY =
-  'title_en,title_ar,address,city_en,area_en,community_en,property_type_en,property_type_key,property_type_names_en,agent_name,agency_name';
+  'title_en,title_ar,address,city_en,area_en,community_en,purpose_key,property_type_en,property_type_keys,property_type_names_en,main_property_type_keys,main_property_type_names_en,features,currency_code,currency_en,currency_symbol,bedrooms_str,bathrooms_str,area_sqm_str,area_sqft_str,price_str,agent_name,agency_name';
 

@@ -42,6 +42,14 @@ export type PropertyDetailRow = {
   image_urls: string[] | null;
   /** Same order as image_urls; true when image is in the featured set. */
   image_is_featured: boolean[] | null;
+  /** Videos from property.property_videos (url, displayOrder, durationSeconds). */
+  videos_json: PropertyVideoJson[] | null;
+};
+
+export type PropertyVideoJson = {
+  url: string;
+  displayOrder: number | null;
+  durationSeconds: number | null;
 };
 
 /**
@@ -106,7 +114,22 @@ export async function getPropertyById(
         SELECT array_agg(COALESCE(pi.is_featured, FALSE) ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC)
         FROM property.PROPERTY_IMAGES pi
         WHERE pi.property_id = p.property_id
-      ) AS image_is_featured
+      ) AS image_is_featured,
+      (
+        SELECT COALESCE(
+          json_agg(
+            json_build_object(
+              'url', pv.video_url,
+              'displayOrder', pv.display_order,
+              'durationSeconds', pv.duration_seconds
+            )
+            ORDER BY pv.display_order ASC NULLS LAST, pv.video_id ASC
+          ),
+          '[]'::json
+        )
+        FROM property.property_videos pv
+        WHERE pv.property_id = p.property_id
+      ) AS videos_json
     FROM property.PROPERTIES p
     LEFT JOIN property.LOCATIONS l ON l.location_id = p.location_id
     LEFT JOIN master.COUNTRIES co ON co.country_id = COALESCE(l.country_id, 1)

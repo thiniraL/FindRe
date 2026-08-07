@@ -11,7 +11,7 @@ import {
 } from './buildFilterQuery';
 import { PROPERTIES_QUERY_BY } from './typesenseSchema';
 import { typesenseSearch, typesenseMultiSearchUnion } from './typesense';
-import { PURPOSE_WORDS_SET, SEARCH_STOPWORDS, getTypesenseNlQuery } from './naturalLanguageQuery';
+import { getTypesenseNlQuery } from './naturalLanguageQuery';
 
 const PURPOSE_KEY_TO_LABEL: Record<string, string> = {
   for_sale: 'For Sale',
@@ -22,16 +22,6 @@ const PURPOSE_KEY_TO_LABEL: Record<string, string> = {
 export function getPurposeLabel(purposeKey: string): string {
   const key = purposeKey?.trim().toLowerCase().replace(/\s+/g, '_') || 'for_sale';
   return PURPOSE_KEY_TO_LABEL[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function stripStopwords(s: string | undefined): string | undefined {
-  if (!s?.trim()) return s;
-  const cleaned = s
-    .split(/\s+/)
-    .filter((w) => !PURPOSE_WORDS_SET.has(w.toLowerCase()) && !SEARCH_STOPWORDS.has(w.toLowerCase()))
-    .join(' ')
-    .trim();
-  return cleaned.length > 0 ? cleaned : undefined;
 }
 
 export type SearchCountNlOptions = {
@@ -48,15 +38,6 @@ export async function runSearchCount(
   nlOptions?: SearchCountNlOptions
 ): Promise<number> {
   const state = { ...filterState };
-  if (state.location) state.location = stripStopwords(state.location);
-  if (state.keyword) state.keyword = stripStopwords(state.keyword);
-  if (state.keywords?.length) {
-    state.keywords = state.keywords
-      .map((k) => stripStopwords(k) || '')
-      .filter(Boolean);
-    if (!state.keywords.length) state.keywords = undefined;
-  }
-
   const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
   const filterBy = buildFilterBy(state);
 

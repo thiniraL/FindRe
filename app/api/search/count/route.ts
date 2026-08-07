@@ -9,12 +9,7 @@ import {
 } from '@/lib/security/validation';
 import type { SearchFilterState } from '@/lib/search/buildFilterQuery';
 import { normalizeKeywords } from '@/lib/search/buildFilterQuery';
-import {
-  applyNaturalLanguageQuery,
-  hasStructuredNaturalLanguageHints,
-  parseNaturalLanguageQuery,
-  resolveNaturalLanguageSearchMode,
-} from '@/lib/search/naturalLanguageQuery';
+import { resolveNaturalLanguageSearchMode } from '@/lib/search/naturalLanguageQuery';
 import {
   getPurposeLabel,
   runSearchCount,
@@ -63,6 +58,12 @@ function parseAgentIdsFromQuery(value: string | undefined): { id: number; type: 
   }
 }
 
+/** When Typesense NL is off, treat free-text q as full-text keyword. */
+function applyQAsKeywordFallback(filterState: SearchFilterState, qValue: string, willUseNl: boolean) {
+  if (!qValue || willUseNl) return;
+  filterState.keyword = filterState.keyword ? `${filterState.keyword} ${qValue}` : qValue;
+}
+
 /**
  * GET /api/search/count
  * Same query params as GET /api/search. Returns totalCount and resultButtonLabel for the current filters.
@@ -94,18 +95,13 @@ export async function GET(request: NextRequest) {
     };
 
     const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
-    const qRaw = parsed.q?.trim() || '';
-    const structuredHints = qRaw ? hasStructuredNaturalLanguageHints(parseNaturalLanguageQuery(qRaw)) : false;
     const { qValue, willUseNl } = resolveNaturalLanguageSearchMode(
       parsed.q,
       nlModelId,
-      parsed.nl_query === false,
-      { hasStructuredHints: structuredHints }
+      parsed.nl_query === false
     );
+    applyQAsKeywordFallback(filterState, qValue, willUseNl);
 
-    if (qValue) {
-      await applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
-    }
     if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';
     }
@@ -153,18 +149,13 @@ export async function POST(request: NextRequest) {
     };
 
     const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
-    const qRaw = body.q?.trim() || '';
-    const structuredHints = qRaw ? hasStructuredNaturalLanguageHints(parseNaturalLanguageQuery(qRaw)) : false;
     const { qValue, willUseNl } = resolveNaturalLanguageSearchMode(
       body.q,
       nlModelId,
-      body.nl_query === false,
-      { hasStructuredHints: structuredHints }
+      body.nl_query === false
     );
+    applyQAsKeywordFallback(filterState, qValue, willUseNl);
 
-    if (qValue) {
-      await applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
-    }
     if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';
     }

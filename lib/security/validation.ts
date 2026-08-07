@@ -137,7 +137,7 @@ export const filtersQuerySchema = z.object({
 // Search with filter values (Typesense). Purpose optional: can be inferred from q (e.g. "selling" → for_sale, "rent" → for_rent).
 export const searchQuerySchema = z.object({
   purpose: z.string().min(1).optional(),
-  /** Natural language query: parsed into purpose, location, beds, baths, price, features, etc. */
+  /** Natural language query sent to Typesense (nl_query + nl_model_id when model is configured). */
   q: z.string().optional(),
   countryId: z.coerce.number().int().min(1).optional(),
   location: z.string().optional(),
@@ -158,7 +158,7 @@ export const searchQuerySchema = z.object({
     /** JSON array of { id: number, type: "agent"|"agency" } e.g. [{"id":1,"type":"agent"},{"id":2,"type":"agency"}] */
     agentIds: z.string().optional(),
     featureIds: z.string().optional(), // comma-separated feature IDs
-  /** Use Typesense Natural Language Search (LLM parses q into filters/sorts). */
+  /** Opt out of Typesense NL with false. When omitted/true and q is set, NL is used if model id is configured. */
   nl_query: z.coerce.boolean().optional(),
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -223,7 +223,7 @@ export const searchBodySchema = z
      */
     agentIds: z.array(z.unknown()).optional(),
     featureIds: z.array(z.coerce.number().int().min(1)).optional(),
-    /** Use Typesense Natural Language Search (LLM parses q into filters/sorts). */
+    /** Opt out of Typesense NL with false. When omitted/true and q is set, NL is used if model id is configured. */
     nl_query: z.boolean().optional(),
     page: z.coerce.number().int().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),

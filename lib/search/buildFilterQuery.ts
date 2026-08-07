@@ -28,7 +28,7 @@ export type SearchFilterState = {
   /** Area range (always sqm) */
   areaMin?: number;
   areaMax?: number;
-  /** Free-text residual (e.g. from NL). Appended to q when no keywords[] chips. */
+  /** Free-text residual. Appended to q when no keywords[] chips. */
   keyword?: string;
   /**
    * Keyword chip values (beach, golf, …). Multiple values are OR'd via multi-search.
@@ -39,12 +39,9 @@ export type SearchFilterState = {
   agentIds?: { id: number; type: 'agency' | 'agent' }[];
   /** Feature IDs from PROPERTY_DETAILS.feature_ids */
   featureIds?: number[];
-  /**
-   * Feature keys from Typesense `features` facet (e.g. golf, beachfront).
-   * Used when NL maps amenity words without resolving numeric IDs yet.
-   */
+  /** Feature keys from Typesense `features` facet (e.g. golf, beachfront). */
   featureKeys?: string[];
-  /** Override default sort (e.g. price:asc for "cheapest"). */
+  /** Override default sort (e.g. price:asc). */
   sortBy?: string;
 };
 

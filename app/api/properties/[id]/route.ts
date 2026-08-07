@@ -6,12 +6,59 @@ import {
 } from '@/lib/utils/errors';
 import { validateParams } from '@/lib/security/validation';
 import { propertyIdSchema } from '@/lib/security/validation';
-import { getPropertyById } from '@/lib/db/queries/propertyDetails';
+import {
+  getPropertyById,
+  type PropertyVideoJson,
+} from '@/lib/db/queries/propertyDetails';
 import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
 import { propertyDetailCache } from '@/lib/cache';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 
 export const dynamic = 'force-dynamic';
+
+type PropertyMediaItem =
+  | { url: string; mediaType: 'image' }
+  | {
+      url: string;
+      mediaType: 'video';
+      durationSeconds?: number;
+    };
+
+function parseVideosJson(
+  videosJson: PropertyVideoJson[] | string | null | undefined
+): PropertyVideoJson[] {
+  if (!videosJson) return [];
+  if (typeof videosJson === 'string') {
+    try {
+      const parsed = JSON.parse(videosJson) as PropertyVideoJson[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(videosJson) ? videosJson : [];
+}
+
+/** Additional images first (existing order), then videos by display_order / video_id. */
+function buildAdditionalMedia(
+  imageUrls: string[],
+  videos: PropertyVideoJson[]
+): PropertyMediaItem[] {
+  const imageMedia: PropertyMediaItem[] = imageUrls.map((url) => ({
+    url,
+    mediaType: 'image',
+  }));
+  const videoMedia: PropertyMediaItem[] = videos
+    .filter((v) => typeof v?.url === 'string' && v.url.length > 0)
+    .map((v) => ({
+      url: v.url,
+      mediaType: 'video' as const,
+      ...(v.durationSeconds != null
+        ? { durationSeconds: Number(v.durationSeconds) }
+        : {}),
+    }));
+  return [...imageMedia, ...videoMedia];
+}
 
 function getLanguageCode(request: NextRequest): 'en' | 'ar' {
   const acceptLanguage = request.headers.get('accept-language') || 'en';
@@ -41,7 +88,7 @@ export async function GET(
     const { id: propertyId } = validateParams(params, propertyIdSchema);
     const lang = getLanguageCode(request);
 
-    const cacheKey = `property:${propertyId}:${lang}`;
+    const cacheKey = `property:${propertyId}:${lang}:v3`;
     let row = propertyDetailCache.get<Awaited<ReturnType<typeof getPropertyById>>>(cacheKey);
     if (!row) {
       row = await getPropertyById(propertyId, lang);
@@ -121,10 +168,20 @@ export async function GET(
       areaSqft: row.area_sqft ?? null,
       profileImageUrl: row.agent_profile_image_url ?? null,
       features: Array.isArray(row.features_jsonb) ? row.features_jsonb : [],
-      images: {
-        primaryImageUrl: row.primary_image_url ?? (Array.isArray(row.image_urls) ? row.image_urls[0] ?? null : null),
-        additionalImageUrls: Array.isArray(row.image_urls) && row.image_urls.length > 0 ? row.image_urls.slice(1) : [],
-      },
+      images: (() => {
+        const primaryImageUrl =
+          row.primary_image_url ??
+          (Array.isArray(row.image_urls) ? row.image_urls[0] ?? null : null);
+        const additionalImageOnly =
+          Array.isArray(row.image_urls) && row.image_urls.length > 0
+            ? row.image_urls.slice(1)
+            : [];
+        const videos = parseVideosJson(row.videos_json);
+        return {
+          primaryImageUrl,
+          additionalImageUrls: buildAdditionalMedia(additionalImageOnly, videos),
+        };
+      })(),
       agentBy:
         row.agent_id != null
           ? {

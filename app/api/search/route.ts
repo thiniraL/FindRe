@@ -11,15 +11,9 @@ import {
   normalizeKeywords,
   type SearchFilterState,
 } from '@/lib/search/buildFilterQuery';
-// GET/POST keys match SEARCH_FILTER_CONFIGS filter id (see lib/search/filterConfigToSearchKeys.ts; price→priceMin/priceMax, area→areaMin/areaMax; area always sqm)
 import {
-  applyNaturalLanguageQuery,
   getTypesenseNlQuery,
-  hasStructuredNaturalLanguageHints,
-  parseNaturalLanguageQuery,
   resolveNaturalLanguageSearchMode,
-  PURPOSE_WORDS_SET,
-  SEARCH_STOPWORDS,
 } from '@/lib/search/naturalLanguageQuery';
 import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
 import { verifyAccessToken } from '@/lib/auth/jwt';
@@ -29,10 +23,9 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Search pipeline:
- *   Prefer rule-based parse when q yields structured filters (beds/price/type/…).
- *   Typesense NL (nl_query + nl_model_id) only when q is non-empty, model is set,
- *   caller did not opt out, AND rules extracted little/nothing — avoids dual AND → 0 hits.
- *   Empty/missing q → normal Typesense search (no NL params).
+ *   When q is non-empty and TYPESENSE_NL_MODEL_ID is set (and caller did not pass
+ *   nl_query=false), send q to Typesense with nl_query=true + nl_model_id.
+ *   Explicit filter params still become filter_by. Empty q → normal Typesense search.
  */
 
 const DEFAULT_COUNTRY_ID = 1;
@@ -144,6 +137,12 @@ function tryGetUserIdFromAuthHeader(request: NextRequest): string | null {
   }
 }
 
+/** When Typesense NL is off, treat free-text q as full-text keyword. */
+function applyQAsKeywordFallback(filterState: SearchFilterState, qValue: string, willUseNl: boolean) {
+  if (!qValue || willUseNl) return;
+  filterState.keyword = filterState.keyword ? `${filterState.keyword} ${qValue}` : qValue;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const parsed = validateQuery(request, searchQuerySchema);
@@ -172,20 +171,13 @@ export async function GET(request: NextRequest) {
       featureIds: parseOptionalIntList(parsed.featureIds)?.filter((n) => n >= 1),
     };
 
-    // Prefer rules when they extract structure; Typesense NL only for residual free text.
     const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
-    const qRaw = parsed.q?.trim() || '';
-    const structuredHints = qRaw ? hasStructuredNaturalLanguageHints(parseNaturalLanguageQuery(qRaw)) : false;
     const { qValue, willUseNl } = resolveNaturalLanguageSearchMode(
       parsed.q,
       nlModelId,
-      parsed.nl_query === false,
-      { hasStructuredHints: structuredHints }
+      parsed.nl_query === false
     );
-
-    if (qValue) {
-      await applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
-    }
+    applyQAsKeywordFallback(filterState, qValue, willUseNl);
 
     // Default purpose only for non-NL search. NL lets the model set purpose_key (e.g. for_rent).
     if (!willUseNl && !filterState.purpose?.trim()) {
@@ -206,16 +198,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-function stripStopwords(s: string | undefined): string | undefined {
-  if (!s?.trim()) return s;
-  const cleaned = s
-    .split(/\s+/)
-    .filter((w) => !PURPOSE_WORDS_SET.has(w.toLowerCase()) && !SEARCH_STOPWORDS.has(w.toLowerCase()))
-    .join(' ')
-    .trim();
-  return cleaned.length > 0 ? cleaned : undefined;
-}
-
 type RunSearchNlOptions = {
   useNlQuery: boolean;
   rawQ?: string;
@@ -230,15 +212,6 @@ async function runSearch(
   nlOptions?: RunSearchNlOptions
 ): Promise<{ items: Array<{ property: object }>; found: number }> {
   const lang = getLanguageCode(request);
-  if (filterState.location) filterState.location = stripStopwords(filterState.location);
-  if (filterState.keyword) filterState.keyword = stripStopwords(filterState.keyword);
-  if (filterState.keywords?.length) {
-    filterState.keywords = filterState.keywords
-      .map((k) => stripStopwords(k) || '')
-      .filter(Boolean);
-    if (!filterState.keywords.length) filterState.keywords = undefined;
-  }
-
   const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
   const filterBy = buildFilterBy(filterState);
 
@@ -375,18 +348,13 @@ export async function POST(request: NextRequest) {
     };
 
     const nlModelId = process.env.TYPESENSE_NL_MODEL_ID?.trim() || undefined;
-    const qRaw = body.q?.trim() || '';
-    const structuredHints = qRaw ? hasStructuredNaturalLanguageHints(parseNaturalLanguageQuery(qRaw)) : false;
     const { qValue, willUseNl } = resolveNaturalLanguageSearchMode(
       body.q,
       nlModelId,
-      body.nl_query === false,
-      { hasStructuredHints: structuredHints }
+      body.nl_query === false
     );
+    applyQAsKeywordFallback(filterState, qValue, willUseNl);
 
-    if (qValue) {
-      await applyNaturalLanguageQuery(filterState, qValue, { structuredOnly: willUseNl });
-    }
     if (!willUseNl && !filterState.purpose?.trim()) {
       filterState.purpose = 'for_sale';
     }

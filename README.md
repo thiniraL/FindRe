@@ -126,13 +126,12 @@ All database schema is maintained in `mvp.sql`. This is the main schema file con
 
 Search follows this flow:
 
-1. **User text** – Free-text query (`q`) and optional explicit params (location, beds, price, etc.).
-2. **NLP / Rule parser** – `parseNaturalLanguageQuery` extracts location, beds, baths, price, features, property-type keywords; `mergeNaturalLanguageIntoState` merges into filter state (explicit params override).
-3. **Structured query + filters** – `buildSearchQuery` produces full-text `q` (location + keyword); `buildFilterBy` produces Typesense `filter_by` (purpose, country, property type, beds, baths, price, area, features, etc.).
-4. **Typesense** – Search runs against the `properties` collection with the built `q` and `filter_by`.
-5. **Results** – Paginated hits are mapped and returned.
+1. **User text** – Free-text natural language query (`q`) and optional explicit filter params (location, beds, price, etc.).
+2. **Typesense NL** – When `q` is non-empty and `TYPESENSE_NL_MODEL_ID` is set, the API calls Typesense with `nl_query=true` and `nl_model_id` (pass `nl_query=false` to opt out). Typesense’s NL model parses `q` into filters/sorts.
+3. **Structured filters** – Explicit UI params still become Typesense `filter_by` via `buildFilterBy`. If NL is off, `q` falls back to full-text keyword search via `buildSearchQuery`.
+4. **Results** – Paginated hits are mapped and returned.
 
-Endpoint: `GET /api/search` with query params (e.g. `q`, `purpose`, `location`, `bedroomsMin`, `priceMax`). See `searchQuerySchema` in `lib/security/validation.ts` for supported params.
+**Frontend:** send the natural-language sentence as `q` (e.g. `GET /api/search?q=3+bed+villa+with+pool+in+Costa+Blanca`). Do not re-parse locally; Typesense handles NL. See `searchQuerySchema` in `lib/security/validation.ts` for supported params.
 
 **Filter sources (current):**
 - **Location** – From `property.PROPERTIES.address` only. Typesense indexes `address` (and optional `city_en`, `area_en`, `community_en` when `property.LOCATIONS` is used). Search/filter do not rely on `property.LOCATIONS`; location is address-based full-text.
