@@ -6,6 +6,7 @@ import { AppError, createErrorResponse, createPaginatedResponse } from '@/lib/ut
 import { validateQuery } from '@/lib/security/validation';
 import { getLikedPropertyIds } from '@/lib/db/queries/propertyViews';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
+import { zipMediaUrls, toMediaItem } from '@/lib/search/propertyMedia';
 import { typesenseSearch } from '@/lib/search/typesense';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 
@@ -42,7 +43,9 @@ type TypesensePropertyDoc = {
   area_en?: string;
   community_en?: string;
   primary_image_url?: string;
+  primary_media_type?: string;
   additional_image_urls?: string[];
+  additional_media_types?: string[];
 };
 
 function getSessionId(request: NextRequest): string {
@@ -84,12 +87,12 @@ type FavouriteItem = {
     areaSqm: number | null;
     bedrooms: number | null;
     bathrooms: number | null;
-    primaryImageUrl: string | null;
+    primaryImageUrl: { url: string; mediaType: 'image' | 'video' } | null;
     profileImageUrl: string | null;
     agent: { id: number; name: string | null; email: string | null; phone: string | null; whatsapp: string | null; profileImageUrl: string | null; agency: { id: number; name: string | null } | null } | null;
     isFeatured: boolean;
     featuredRank: number | null;
-    additionalImageUrls: string[];
+    additionalImageUrls: Array<{ url: string; mediaType: 'image' | 'video' }>;
     purposeKey: string | null;
     isLiked: true;
   };
@@ -109,7 +112,7 @@ function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): Favouri
       areaSqm: d.area_sqm ?? null,
       bedrooms: d.bedrooms ?? null,
       bathrooms: d.bathrooms ?? null,
-      primaryImageUrl: d.primary_image_url ?? null,
+      primaryImageUrl: toMediaItem(d.primary_image_url, d.primary_media_type),
       profileImageUrl: d.profile_image_url ?? null,
       agent: d.agent_id
         ? {
@@ -124,7 +127,10 @@ function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): Favouri
         : null,
       isFeatured: Boolean(d.is_featured),
       featuredRank: d.featured_rank ?? null,
-      additionalImageUrls: d.additional_image_urls ?? [],
+      additionalImageUrls: zipMediaUrls(
+        d.additional_image_urls,
+        d.additional_media_types
+      ),
       purposeKey: d.purpose_key ?? null,
       isLiked: true,
     },

@@ -38,18 +38,27 @@ export type PropertyDetailRow = {
   agency_name: string | null;
   agency_logo_url: string | null;
   primary_image_url: string | null;
-  /** All images in display order; each has url and is_featured (featured set max 5). */
-  image_urls: string[] | null;
-  /** Same order as image_urls; true when image is in the featured set. */
-  image_is_featured: boolean[] | null;
-  /** Videos from property.property_videos (url, displayOrder, durationSeconds). */
+  /**
+   * Images with shared displayOrder (mixed with videos on the admin Media tab).
+   * Featured set is up to 5 mixed image/video items.
+   */
+  images_json: PropertyImageJson[] | null;
+  /** Videos from property.property_videos (url, displayOrder, durationSeconds, isFeatured). */
   videos_json: PropertyVideoJson[] | null;
+};
+
+export type PropertyImageJson = {
+  url: string;
+  displayOrder: number | null;
+  isFeatured: boolean;
 };
 
 export type PropertyVideoJson = {
   url: string;
   displayOrder: number | null;
   durationSeconds: number | null;
+  /** Present when property.property_videos.is_featured exists. */
+  isFeatured?: boolean;
 };
 
 /**
@@ -106,22 +115,28 @@ export async function getPropertyById(
       ag.logo_url AS agency_logo_url,
       primary_img.image_url AS primary_image_url,
       (
-        SELECT array_agg(COALESCE(pi.compressed_image_url, pi.image_url) ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC)
+        SELECT COALESCE(
+          json_agg(
+            json_build_object(
+              'url', COALESCE(pi.compressed_image_url, pi.image_url),
+              'displayOrder', pi.display_order,
+              'isFeatured', COALESCE(pi.is_featured, FALSE)
+            )
+            ORDER BY pi.display_order ASC NULLS LAST, pi.image_id ASC
+          ),
+          '[]'::json
+        )
         FROM property.PROPERTY_IMAGES pi
         WHERE pi.property_id = p.property_id
-      ) AS image_urls,
-      (
-        SELECT array_agg(COALESCE(pi.is_featured, FALSE) ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC)
-        FROM property.PROPERTY_IMAGES pi
-        WHERE pi.property_id = p.property_id
-      ) AS image_is_featured,
+      ) AS images_json,
       (
         SELECT COALESCE(
           json_agg(
             json_build_object(
               'url', pv.video_url,
               'displayOrder', pv.display_order,
-              'durationSeconds', pv.duration_seconds
+              'durationSeconds', pv.duration_seconds,
+              'isFeatured', COALESCE(pv.is_featured, FALSE)
             )
             ORDER BY pv.display_order ASC NULLS LAST, pv.video_id ASC
           ),
@@ -140,10 +155,11 @@ export async function getPropertyById(
     LEFT JOIN business.AGENTS a ON a.agent_id = p.agent_id
     LEFT JOIN business.AGENCIES ag ON ag.agency_id = a.agency_id
     LEFT JOIN LATERAL (
+      -- First featured image by shared display_order (fallback: any image by display_order).
       SELECT COALESCE(pi.compressed_image_url, pi.image_url) AS image_url
       FROM property.PROPERTY_IMAGES pi
       WHERE pi.property_id = p.property_id
-      ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC
+      ORDER BY COALESCE(pi.is_featured, FALSE) DESC, pi.display_order ASC NULLS LAST, pi.image_id ASC
       LIMIT 1
     ) primary_img ON TRUE
     WHERE p.property_id = $1

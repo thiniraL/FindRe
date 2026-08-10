@@ -105,10 +105,13 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'agent_phone', type: 'string', optional: true },
     { name: 'agent_whatsapp', type: 'string', optional: true },
 
-    // Media
+    // Media (URLs may be image or video; parallel *_media_types is "image" | "video")
     { name: 'primary_image_url', type: 'string', optional: true },
+    { name: 'primary_media_type', type: 'string', optional: true },
     { name: 'additional_image_urls', type: 'string[]', optional: true },
+    { name: 'additional_media_types', type: 'string[]', optional: true },
     { name: 'all_image_urls', type: 'string[]', optional: true },
+    { name: 'all_media_types', type: 'string[]', optional: true },
     { name: 'image_is_featured', type: 'int32[]', optional: true },
 
     // Optional geo

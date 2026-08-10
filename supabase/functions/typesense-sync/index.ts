@@ -86,8 +86,13 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'agent_phone', type: 'string', optional: true },
     { name: 'agent_whatsapp', type: 'string', optional: true },
     { name: 'primary_image_url', type: 'string', optional: true },
+    // "image" | "video" — primary can be either (first featured / first media by display_order)
+    { name: 'primary_media_type', type: 'string', optional: true },
     { name: 'additional_image_urls', type: 'string[]', optional: true },
+    // Parallel to additional_image_urls / all_image_urls: "image" | "video"
+    { name: 'additional_media_types', type: 'string[]', optional: true },
     { name: 'all_image_urls', type: 'string[]', optional: true },
+    { name: 'all_media_types', type: 'string[]', optional: true },
     { name: 'image_is_featured', type: 'int32[]', optional: true },
     { name: 'geo', type: 'geopoint', optional: true },
   ],
@@ -312,10 +317,84 @@ type PropertyDoc = {
   area_en: string | null;
   community_en: string | null;
   primary_image_url: string | null;
+  primary_media_type: string | null;
   additional_image_urls: string[] | null;
+  additional_media_types: string[] | null;
   all_image_urls: string[] | null;
+  all_media_types: string[] | null;
   image_is_featured: number[] | null;
 };
+
+type MediaJsonRow = {
+  url?: string | null;
+  mediaType?: string | null;
+  isFeatured?: boolean | null;
+  displayOrder?: number | null;
+};
+
+function parseMediaJson(raw: MediaJsonRow[] | string | null | undefined): MediaJsonRow[] {
+  if (!raw) return [];
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as MediaJsonRow[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(raw) ? raw : [];
+}
+
+/**
+ * Build Typesense media fields from mixed image/video rows (shared display_order).
+ * Featured carousel = up to 5 featured items (or first 5 if none marked featured).
+ * Primary is the first carousel item (image or video).
+ */
+function buildMediaDocFields(raw: MediaJsonRow[] | string | null | undefined): {
+  primary_image_url: string | null;
+  primary_media_type: string | null;
+  additional_image_urls: string[] | null;
+  additional_media_types: string[] | null;
+  all_image_urls: string[] | null;
+  all_media_types: string[] | null;
+  image_is_featured: number[] | null;
+} {
+  const media = parseMediaJson(raw)
+    .map((row) => ({
+      url: typeof row?.url === 'string' ? row.url.trim() : '',
+      mediaType: row?.mediaType === 'video' ? ('video' as const) : ('image' as const),
+      isFeatured: Boolean(row?.isFeatured),
+    }))
+    .filter((row) => row.url.length > 0);
+
+  if (!media.length) {
+    return {
+      primary_image_url: null,
+      primary_media_type: null,
+      additional_image_urls: null,
+      additional_media_types: null,
+      all_image_urls: null,
+      all_media_types: null,
+      image_is_featured: null,
+    };
+  }
+
+  const hasFeatured = media.some((row) => row.isFeatured);
+  const pool = hasFeatured ? media.filter((row) => row.isFeatured) : media;
+  const carousel = pool.slice(0, 5);
+  const primary = carousel[0] ?? null;
+  const additional = primary ? carousel.slice(1) : carousel;
+
+  return {
+    primary_image_url: primary?.url ?? null,
+    primary_media_type: primary?.mediaType ?? null,
+    additional_image_urls: additional.map((row) => row.url),
+    additional_media_types: additional.map((row) => row.mediaType),
+    all_image_urls: media.map((row) => row.url),
+    all_media_types: media.map((row) => row.mediaType),
+    image_is_featured: media.map((row) => (row.isFeatured ? 1 : 0)),
+  };
+}
 
 async function importDocs(docs: PropertyDoc[]): Promise<void> {
   if (!docs.length) return;
@@ -487,10 +566,7 @@ serve(async (req) => {
           city_en: string | null;
           area_en: string | null;
           community_en: string | null;
-          primary_image_url: string | null;
-          additional_image_urls: string[] | null;
-          all_image_urls: string[] | null;
-          image_is_featured: number[] | null;
+          media_json: MediaJsonRow[] | string | null;
           updated_epoch: number | bigint;
         }>(
           `
@@ -574,11 +650,8 @@ serve(async (req) => {
           )
           SELECT
             b.*,
-            img.image_url AS primary_image_url,
             feats.features,
-            add_imgs.additional_image_urls,
-            all_imgs.all_image_urls,
-            all_imgs.image_is_featured,
+            media.media_json,
             EXTRACT(
               EPOCH FROM GREATEST(
                 b.updated_at,
@@ -587,50 +660,48 @@ serve(async (req) => {
             )::bigint AS updated_epoch
           FROM base b
           LEFT JOIN LATERAL (
-            SELECT EXISTS(
-              SELECT 1 FROM property.PROPERTY_IMAGES pi
-              WHERE pi.property_id = b.property_id AND pi.is_featured = TRUE
-            ) AS has_featured
-          ) hf ON TRUE
-          LEFT JOIN LATERAL (
-            SELECT COALESCE(pi.compressed_image_url, pi.image_url) AS image_url
-            FROM property.PROPERTY_IMAGES pi
-            WHERE pi.property_id = b.property_id
-              AND ((hf.has_featured AND pi.is_featured = TRUE) OR (NOT hf.has_featured))
-            ORDER BY pi.display_order ASC, pi.is_primary DESC NULLS LAST, pi.image_id ASC
-            LIMIT 1
-          ) img ON TRUE
-          LEFT JOIN LATERAL (
             SELECT ARRAY(
               SELECT f.feature_key FROM unnest(COALESCE(b.feature_ids, '{}')) AS fid
               JOIN property.FEATURES f ON f.feature_id = fid
             ) AS features
           ) feats ON TRUE
           LEFT JOIN LATERAL (
-            SELECT ARRAY(
-              SELECT COALESCE(pi.compressed_image_url, pi.image_url)
+            SELECT COALESCE(
+              json_agg(
+                json_build_object(
+                  'url', m.url,
+                  'mediaType', m.media_type,
+                  'isFeatured', m.is_featured,
+                  'displayOrder', m.display_order
+                )
+                ORDER BY m.display_order ASC NULLS LAST, m.tie ASC, m.id ASC
+              ),
+              '[]'::json
+            ) AS media_json
+            FROM (
+              SELECT
+                COALESCE(pi.compressed_image_url, pi.image_url) AS url,
+                'image'::text AS media_type,
+                COALESCE(pi.is_featured, FALSE) AS is_featured,
+                pi.display_order,
+                0 AS tie,
+                pi.image_id AS id
               FROM property.PROPERTY_IMAGES pi
               WHERE pi.property_id = b.property_id
-                AND ((hf.has_featured AND pi.is_featured = TRUE) OR (NOT hf.has_featured))
-              ORDER BY pi.display_order ASC, pi.is_primary DESC NULLS LAST, pi.image_id ASC
-              OFFSET 1 LIMIT 4
-            ) AS additional_image_urls
-          ) add_imgs ON TRUE
-          LEFT JOIN LATERAL (
-            SELECT
-              ARRAY(
-                SELECT COALESCE(pi.compressed_image_url, pi.image_url)
-                FROM property.PROPERTY_IMAGES pi
-                WHERE pi.property_id = b.property_id
-                ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC
-              ) AS all_image_urls,
-              ARRAY(
-                SELECT (CASE WHEN COALESCE(pi.is_featured, FALSE) THEN 1 ELSE 0 END)::int
-                FROM property.PROPERTY_IMAGES pi
-                WHERE pi.property_id = b.property_id
-                ORDER BY pi.is_primary DESC NULLS LAST, pi.display_order ASC, pi.image_id ASC
-              ) AS image_is_featured
-          ) all_imgs ON TRUE
+              UNION ALL
+              SELECT
+                pv.video_url AS url,
+                'video'::text AS media_type,
+                COALESCE(pv.is_featured, FALSE) AS is_featured,
+                pv.display_order,
+                1 AS tie,
+                pv.video_id AS id
+              FROM property.property_videos pv
+              WHERE pv.property_id = b.property_id
+                AND pv.video_url IS NOT NULL
+                AND btrim(pv.video_url) <> ''
+            ) m
+          ) media ON TRUE
           LEFT JOIN LATERAL (
             SELECT MAX(pi.last_compressed_at) AS last_compressed_at
             FROM property.PROPERTY_IMAGES pi
@@ -753,10 +824,7 @@ serve(async (req) => {
               city_en: r.city_en,
               area_en: r.area_en,
               community_en: r.community_en,
-              primary_image_url: r.primary_image_url,
-              additional_image_urls: r.additional_image_urls,
-              all_image_urls: r.all_image_urls ?? null,
-              image_is_featured: r.image_is_featured ?? null,
+              ...buildMediaDocFields(r.media_json),
             };
           });
 

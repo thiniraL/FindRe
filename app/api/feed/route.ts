@@ -7,6 +7,7 @@ import { validateQuery } from '@/lib/security/validation';
 import { getLastAnalyzedAtForSession, getPreferencesForFeed } from '@/lib/db/queries/preferences';
 import { feedPrefsCache } from '@/lib/cache';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
+import { zipMediaUrls, toMediaItem } from '@/lib/search/propertyMedia';
 import { typesenseSearch } from '@/lib/search/typesense';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
@@ -79,7 +80,9 @@ type TypesensePropertyDoc = {
   area_en?: string;
   community_en?: string;
   primary_image_url?: string;
+  primary_media_type?: string;
   additional_image_urls?: string[];
+  additional_media_types?: string[];
 };
 
 type PreferenceCounters = {
@@ -207,12 +210,12 @@ type FeedItem = {
     areaSqm: number | null;
     bedrooms: number | null;
     bathrooms: number | null;
-    primaryImageUrl: string | null;
+    primaryImageUrl: { url: string; mediaType: 'image' | 'video' } | null;
     profileImageUrl: string | null;
     agent: { id: number; name: string | null; email: string | null; phone: string | null; whatsapp: string | null; profileImageUrl: string | null; agency: { id: number; name: string | null } | null } | null;
     isFeatured: boolean;
     featuredRank: number | null;
-    additionalImageUrls: string[];
+    additionalImageUrls: Array<{ url: string; mediaType: 'image' | 'video' }>;
     purposeKey: string | null;
     isLiked: boolean;
   };
@@ -238,7 +241,7 @@ function docToFeedItem(
       areaSqm: d.area_sqm ?? null,
       bedrooms: d.bedrooms ?? null,
       bathrooms: d.bathrooms ?? null,
-      primaryImageUrl: d.primary_image_url ?? null,
+      primaryImageUrl: toMediaItem(d.primary_image_url, d.primary_media_type),
       profileImageUrl: d.profile_image_url ?? null,
       agent: d.agent_id
         ? {
@@ -255,8 +258,11 @@ function docToFeedItem(
         : null,
       isFeatured,
       featuredRank: isFeatured ? (d.featured_rank ?? null) : null,
-      // Feed returns only featured images (primary + additional from Typesense; max 5 total)
-      additionalImageUrls: d.additional_image_urls ?? [],
+      // Featured media carousel (images + videos) with mediaType from Typesense
+      additionalImageUrls: zipMediaUrls(
+        d.additional_image_urls,
+        d.additional_media_types
+      ),
       purposeKey: d.purpose_key ?? null,
       isLiked: false,
     },

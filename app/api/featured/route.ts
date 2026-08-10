@@ -8,6 +8,7 @@ import {
 } from '@/lib/utils/errors';
 import { featuredQuerySchema, validateQuery } from '@/lib/security/validation';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
+import { toMediaItem } from '@/lib/search/propertyMedia';
 import { typesenseSearch } from '@/lib/search/typesense';
 
 function getLanguageCode(request: NextRequest): string {
@@ -35,6 +36,7 @@ export async function GET(request: NextRequest) {
       bedrooms?: number;
       bathrooms?: number;
       primary_image_url?: string;
+      primary_media_type?: string;
       agent_id?: number;
       agent_name?: string;
       agent_profile_image_url?: string;
@@ -70,7 +72,7 @@ export async function GET(request: NextRequest) {
           furnishingStatus: null,
           bedrooms: d.bedrooms ?? null,
           bathrooms: d.bathrooms ?? null,
-          primaryImageUrl: d.primary_image_url ?? null,
+          primaryImageUrl: toMediaItem(d.primary_image_url, d.primary_media_type),
           agent: d.agent_id
             ? {
               id: d.agent_id,

@@ -8,6 +8,7 @@ import { validateParams } from '@/lib/security/validation';
 import { propertyIdSchema } from '@/lib/security/validation';
 import {
   getPropertyById,
+  type PropertyImageJson,
   type PropertyVideoJson,
 } from '@/lib/db/queries/propertyDetails';
 import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
@@ -17,47 +18,89 @@ import { verifyAccessToken } from '@/lib/auth/jwt';
 export const dynamic = 'force-dynamic';
 
 type PropertyMediaItem =
-  | { url: string; mediaType: 'image' }
+  | {
+      url: string;
+      mediaType: 'image';
+      displayOrder: number | null;
+      isFeatured: boolean;
+    }
   | {
       url: string;
       mediaType: 'video';
+      displayOrder: number | null;
+      isFeatured: boolean;
       durationSeconds?: number;
     };
 
-function parseVideosJson(
-  videosJson: PropertyVideoJson[] | string | null | undefined
-): PropertyVideoJson[] {
-  if (!videosJson) return [];
-  if (typeof videosJson === 'string') {
+function parseJsonArray<T>(value: T[] | string | null | undefined): T[] {
+  if (!value) return [];
+  if (typeof value === 'string') {
     try {
-      const parsed = JSON.parse(videosJson) as PropertyVideoJson[];
+      const parsed = JSON.parse(value) as T[];
       return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
   }
-  return Array.isArray(videosJson) ? videosJson : [];
+  return Array.isArray(value) ? value : [];
 }
 
-/** Additional images first (existing order), then videos by display_order / video_id. */
-function buildAdditionalMedia(
-  imageUrls: string[],
+function orderKey(displayOrder: number | null | undefined): number {
+  return displayOrder == null || Number.isNaN(Number(displayOrder))
+    ? Number.MAX_SAFE_INTEGER
+    : Number(displayOrder);
+}
+
+/**
+ * Merge images + videos into one gallery ordered by the shared displayOrder
+ * written by the admin Media tab (featured + other, mixed types).
+ */
+function buildOrderedMedia(
+  images: PropertyImageJson[],
   videos: PropertyVideoJson[]
 ): PropertyMediaItem[] {
-  const imageMedia: PropertyMediaItem[] = imageUrls.map((url) => ({
-    url,
-    mediaType: 'image',
-  }));
-  const videoMedia: PropertyMediaItem[] = videos
-    .filter((v) => typeof v?.url === 'string' && v.url.length > 0)
-    .map((v) => ({
-      url: v.url,
-      mediaType: 'video' as const,
-      ...(v.durationSeconds != null
-        ? { durationSeconds: Number(v.durationSeconds) }
-        : {}),
-    }));
-  return [...imageMedia, ...videoMedia];
+  type Ranked = {
+    displayOrder: number;
+    tie: number;
+    item: PropertyMediaItem;
+  };
+
+  const ranked: Ranked[] = [];
+
+  images.forEach((img, index) => {
+    if (typeof img?.url !== 'string' || !img.url) return;
+    ranked.push({
+      displayOrder: orderKey(img.displayOrder),
+      tie: index,
+      item: {
+        url: img.url,
+        mediaType: 'image',
+        displayOrder: img.displayOrder ?? null,
+        isFeatured: Boolean(img.isFeatured),
+      },
+    });
+  });
+
+  videos.forEach((video, index) => {
+    if (typeof video?.url !== 'string' || !video.url) return;
+    ranked.push({
+      displayOrder: orderKey(video.displayOrder),
+      // Keep stable ordering when an image and video share the same displayOrder.
+      tie: 1_000_000 + index,
+      item: {
+        url: video.url,
+        mediaType: 'video',
+        displayOrder: video.displayOrder ?? null,
+        isFeatured: Boolean(video.isFeatured),
+        ...(video.durationSeconds != null
+          ? { durationSeconds: Number(video.durationSeconds) }
+          : {}),
+      },
+    });
+  });
+
+  ranked.sort((a, b) => a.displayOrder - b.displayOrder || a.tie - b.tie);
+  return ranked.map((entry) => entry.item);
 }
 
 function getLanguageCode(request: NextRequest): 'en' | 'ar' {
@@ -88,7 +131,8 @@ export async function GET(
     const { id: propertyId } = validateParams(params, propertyIdSchema);
     const lang = getLanguageCode(request);
 
-    const cacheKey = `property:${propertyId}:${lang}:v3`;
+    // v4: mixed image/video gallery sorted by shared displayOrder
+    const cacheKey = `property:${propertyId}:${lang}:v4`;
     let row = propertyDetailCache.get<Awaited<ReturnType<typeof getPropertyById>>>(cacheKey);
     if (!row) {
       row = await getPropertyById(propertyId, lang);
@@ -136,6 +180,33 @@ export async function GET(
       if (status) isLiked = status.isLiked;
     }
 
+    const images = parseJsonArray<PropertyImageJson>(row.images_json);
+    const videos = parseJsonArray<PropertyVideoJson>(row.videos_json);
+    const orderedMedia = buildOrderedMedia(images, videos);
+    const hasFeatured = orderedMedia.some((item) => item.isFeatured);
+    const featuredPool = hasFeatured
+      ? orderedMedia.filter((item) => item.isFeatured)
+      : orderedMedia;
+    const primary =
+      featuredPool[0] ??
+      orderedMedia[0] ??
+      null;
+    const primaryImageUrl = primary
+      ? {
+          url: primary.url,
+          mediaType: primary.mediaType,
+          ...(primary.mediaType === 'video' && primary.durationSeconds != null
+            ? { durationSeconds: primary.durationSeconds }
+            : {}),
+        }
+      : null;
+    const additionalImageUrls = primary
+      ? orderedMedia.filter(
+          (item) =>
+            !(item.mediaType === primary.mediaType && item.url === primary.url)
+        )
+      : orderedMedia;
+
     const payload = {
       id: row.property_id,
       title: row.title ?? null,
@@ -168,20 +239,11 @@ export async function GET(
       areaSqft: row.area_sqft ?? null,
       profileImageUrl: row.agent_profile_image_url ?? null,
       features: Array.isArray(row.features_jsonb) ? row.features_jsonb : [],
-      images: (() => {
-        const primaryImageUrl =
-          row.primary_image_url ??
-          (Array.isArray(row.image_urls) ? row.image_urls[0] ?? null : null);
-        const additionalImageOnly =
-          Array.isArray(row.image_urls) && row.image_urls.length > 0
-            ? row.image_urls.slice(1)
-            : [];
-        const videos = parseVideosJson(row.videos_json);
-        return {
-          primaryImageUrl,
-          additionalImageUrls: buildAdditionalMedia(additionalImageOnly, videos),
-        };
-      })(),
+      images: {
+        // First featured media item by shared displayOrder (image or video).
+        primaryImageUrl,
+        additionalImageUrls,
+      },
       agentBy:
         row.agent_id != null
           ? {

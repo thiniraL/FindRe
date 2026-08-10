@@ -3,6 +3,7 @@ import { createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors
 import { validateQuery, validateBody } from '@/lib/security/validation';
 import { searchQuerySchema, searchBodySchema, agentIdFilterEntrySchema, normalizeAgentIds } from '@/lib/security/validation';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
+import { zipMediaUrls, toMediaItem } from '@/lib/search/propertyMedia';
 import {
   buildFilterBy,
   buildSearchQuery,
@@ -66,8 +67,11 @@ type TypesensePropertyDoc = {
   area_en?: string;
   community_en?: string;
   primary_image_url?: string;
+  primary_media_type?: string;
   additional_image_urls?: string[];
+  additional_media_types?: string[];
   all_image_urls?: string[];
+  all_media_types?: string[];
   image_is_featured?: number[];
 };
 
@@ -287,7 +291,7 @@ async function mapHitsToItems(
         areaSqm: d.area_sqm ?? null,
         bedrooms: d.bedrooms ?? null,
         bathrooms: d.bathrooms ?? null,
-        primaryImageUrl: d.primary_image_url ?? null,
+        primaryImageUrl: toMediaItem(d.primary_image_url, d.primary_media_type),
         profileImageUrl: d.profile_image_url ?? null,
         agent: d.agent_id
           ? {
@@ -302,7 +306,10 @@ async function mapHitsToItems(
                 : null,
             }
           : null,
-        additionalImageUrls: d.additional_image_urls ?? [],
+        additionalImageUrls: zipMediaUrls(
+          d.additional_image_urls,
+          d.additional_media_types
+        ),
         purposeKey: d.purpose_key ?? null,
         isLiked: false,
       },
