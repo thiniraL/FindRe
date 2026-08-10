@@ -37,3 +37,14 @@ export function zipMediaUrls(
       mediaType: normalizeMediaType(types[index]),
     }));
 }
+
+/** Legacy string URL helpers (keep old API fields unchanged). */
+export function mediaItemUrl(
+  item: PropertyMediaItem | null | undefined
+): string | null {
+  return item?.url ?? null;
+}
+
+export function mediaItemUrls(items: PropertyMediaItem[]): string[] {
+  return items.map((item) => item.url);
+}

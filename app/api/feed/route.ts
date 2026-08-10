@@ -210,12 +210,16 @@ type FeedItem = {
     areaSqm: number | null;
     bedrooms: number | null;
     bathrooms: number | null;
-    primaryImageUrl: { url: string; mediaType: 'image' | 'video' } | null;
+    primaryImageUrl: string | null;
     profileImageUrl: string | null;
     agent: { id: number; name: string | null; email: string | null; phone: string | null; whatsapp: string | null; profileImageUrl: string | null; agency: { id: number; name: string | null } | null } | null;
     isFeatured: boolean;
     featuredRank: number | null;
-    additionalImageUrls: Array<{ url: string; mediaType: 'image' | 'video' }>;
+    additionalImageUrls: string[];
+    /** New: primary with mediaType (image | video). */
+    primaryMedia: { url: string; mediaType: 'image' | 'video' } | null;
+    /** New: additional mixed media with mediaType. */
+    additionalMedia: Array<{ url: string; mediaType: 'image' | 'video' }>;
     purposeKey: string | null;
     isLiked: boolean;
   };
@@ -230,6 +234,11 @@ function docToFeedItem(
     ? [d.address].filter(Boolean)
     : [d.address, d.community_en, d.area_en, d.city_en].filter(Boolean);
   const location = locationParts.length ? locationParts.join(', ') : null;
+  const primaryMedia = toMediaItem(d.primary_image_url, d.primary_media_type);
+  const additionalMedia = zipMediaUrls(
+    d.additional_image_urls,
+    d.additional_media_types
+  );
   return {
     property: {
       id: Number(d.property_id),
@@ -241,7 +250,7 @@ function docToFeedItem(
       areaSqm: d.area_sqm ?? null,
       bedrooms: d.bedrooms ?? null,
       bathrooms: d.bathrooms ?? null,
-      primaryImageUrl: toMediaItem(d.primary_image_url, d.primary_media_type),
+      primaryImageUrl: primaryMedia?.url ?? d.primary_image_url ?? null,
       profileImageUrl: d.profile_image_url ?? null,
       agent: d.agent_id
         ? {
@@ -258,11 +267,9 @@ function docToFeedItem(
         : null,
       isFeatured,
       featuredRank: isFeatured ? (d.featured_rank ?? null) : null,
-      // Featured media carousel (images + videos) with mediaType from Typesense
-      additionalImageUrls: zipMediaUrls(
-        d.additional_image_urls,
-        d.additional_media_types
-      ),
+      additionalImageUrls: additionalMedia.map((m) => m.url),
+      primaryMedia,
+      additionalMedia,
       purposeKey: d.purpose_key ?? null,
       isLiked: false,
     },

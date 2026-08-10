@@ -277,6 +277,11 @@ async function mapHitsToItems(
     const pid = Number(d.property_id);
     const locationParts = [d.address].filter(Boolean);
     const location = locationParts.length ? locationParts.join(', ') : null;
+    const primaryMedia = toMediaItem(d.primary_image_url, d.primary_media_type);
+    const additionalMedia = zipMediaUrls(
+      d.additional_image_urls,
+      d.additional_media_types
+    );
     return {
       property: {
         id: pid,
@@ -291,7 +296,7 @@ async function mapHitsToItems(
         areaSqm: d.area_sqm ?? null,
         bedrooms: d.bedrooms ?? null,
         bathrooms: d.bathrooms ?? null,
-        primaryImageUrl: toMediaItem(d.primary_image_url, d.primary_media_type),
+        primaryImageUrl: primaryMedia?.url ?? d.primary_image_url ?? null,
         profileImageUrl: d.profile_image_url ?? null,
         agent: d.agent_id
           ? {
@@ -306,10 +311,9 @@ async function mapHitsToItems(
                 : null,
             }
           : null,
-        additionalImageUrls: zipMediaUrls(
-          d.additional_image_urls,
-          d.additional_media_types
-        ),
+        additionalImageUrls: additionalMedia.map((m) => m.url),
+        primaryMedia,
+        additionalMedia,
         purposeKey: d.purpose_key ?? null,
         isLiked: false,
       },

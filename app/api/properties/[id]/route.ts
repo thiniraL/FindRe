@@ -191,16 +191,18 @@ export async function GET(
       featuredPool[0] ??
       orderedMedia[0] ??
       null;
-    const primaryImageUrl = primary
+    const primaryMedia = primary
       ? {
           url: primary.url,
           mediaType: primary.mediaType,
+          displayOrder: primary.displayOrder,
+          isFeatured: primary.isFeatured,
           ...(primary.mediaType === 'video' && primary.durationSeconds != null
             ? { durationSeconds: primary.durationSeconds }
             : {}),
         }
       : null;
-    const additionalImageUrls = primary
+    const additionalMedia = primary
       ? orderedMedia.filter(
           (item) =>
             !(item.mediaType === primary.mediaType && item.url === primary.url)
@@ -240,9 +242,12 @@ export async function GET(
       profileImageUrl: row.agent_profile_image_url ?? null,
       features: Array.isArray(row.features_jsonb) ? row.features_jsonb : [],
       images: {
-        // First featured media item by shared displayOrder (image or video).
-        primaryImageUrl,
-        additionalImageUrls,
+        // Legacy string fields (unchanged for old clients)
+        primaryImageUrl: primaryMedia?.url ?? null,
+        additionalImageUrls: additionalMedia.map((m) => m.url),
+        // New media objects with mediaType
+        primaryMedia,
+        additionalMedia,
       },
       agentBy:
         row.agent_id != null

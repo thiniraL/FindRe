@@ -87,12 +87,14 @@ type FavouriteItem = {
     areaSqm: number | null;
     bedrooms: number | null;
     bathrooms: number | null;
-    primaryImageUrl: { url: string; mediaType: 'image' | 'video' } | null;
+    primaryImageUrl: string | null;
     profileImageUrl: string | null;
     agent: { id: number; name: string | null; email: string | null; phone: string | null; whatsapp: string | null; profileImageUrl: string | null; agency: { id: number; name: string | null } | null } | null;
     isFeatured: boolean;
     featuredRank: number | null;
-    additionalImageUrls: Array<{ url: string; mediaType: 'image' | 'video' }>;
+    additionalImageUrls: string[];
+    primaryMedia: { url: string; mediaType: 'image' | 'video' } | null;
+    additionalMedia: Array<{ url: string; mediaType: 'image' | 'video' }>;
     purposeKey: string | null;
     isLiked: true;
   };
@@ -101,6 +103,11 @@ type FavouriteItem = {
 function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): FavouriteItem {
   const locationParts = [d.address, d.community_en, d.area_en, d.city_en].filter(Boolean);
   const location = locationParts.length ? locationParts.join(', ') : null;
+  const primaryMedia = toMediaItem(d.primary_image_url, d.primary_media_type);
+  const additionalMedia = zipMediaUrls(
+    d.additional_image_urls,
+    d.additional_media_types
+  );
   return {
     property: {
       id: Number(d.property_id),
@@ -112,7 +119,7 @@ function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): Favouri
       areaSqm: d.area_sqm ?? null,
       bedrooms: d.bedrooms ?? null,
       bathrooms: d.bathrooms ?? null,
-      primaryImageUrl: toMediaItem(d.primary_image_url, d.primary_media_type),
+      primaryImageUrl: primaryMedia?.url ?? d.primary_image_url ?? null,
       profileImageUrl: d.profile_image_url ?? null,
       agent: d.agent_id
         ? {
@@ -127,10 +134,9 @@ function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): Favouri
         : null,
       isFeatured: Boolean(d.is_featured),
       featuredRank: d.featured_rank ?? null,
-      additionalImageUrls: zipMediaUrls(
-        d.additional_image_urls,
-        d.additional_media_types
-      ),
+      additionalImageUrls: additionalMedia.map((m) => m.url),
+      primaryMedia,
+      additionalMedia,
       purposeKey: d.purpose_key ?? null,
       isLiked: true,
     },

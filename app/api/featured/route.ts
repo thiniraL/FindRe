@@ -59,6 +59,7 @@ export async function GET(request: NextRequest) {
 
     const items = resp.hits.map((h) => {
       const d = h.document;
+      const primaryMedia = toMediaItem(d.primary_image_url, d.primary_media_type);
       return {
         rank: d.featured_rank ?? null,
         property: {
@@ -72,7 +73,8 @@ export async function GET(request: NextRequest) {
           furnishingStatus: null,
           bedrooms: d.bedrooms ?? null,
           bathrooms: d.bathrooms ?? null,
-          primaryImageUrl: toMediaItem(d.primary_image_url, d.primary_media_type),
+          primaryImageUrl: primaryMedia?.url ?? d.primary_image_url ?? null,
+          primaryMedia,
           agent: d.agent_id
             ? {
               id: d.agent_id,
