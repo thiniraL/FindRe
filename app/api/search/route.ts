@@ -3,7 +3,7 @@ import { createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors
 import { validateQuery, validateBody } from '@/lib/security/validation';
 import { searchQuerySchema, searchBodySchema, agentIdFilterEntrySchema, normalizeAgentIds } from '@/lib/security/validation';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
-import { zipMediaUrls, toMediaItem } from '@/lib/search/propertyMedia';
+import { zipMediaUrls, toMediaItem, imageMediaUrls } from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import {
   buildFilterBy,
@@ -316,7 +316,7 @@ async function mapHitsToItems(
                 : null,
             }
           : null,
-        additionalImageUrls: additionalMedia.map((m) => m.url),
+        additionalImageUrls: imageMediaUrls(additionalMedia),
         primaryMedia,
         additionalMedia,
         purposeKey: d.purpose_key ?? null,

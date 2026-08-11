@@ -15,6 +15,7 @@ import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
 import { propertyDetailCache } from '@/lib/cache';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { unwrapTitle } from '@/lib/search/unwrapTitle';
+import { imageMediaUrls } from '@/lib/search/propertyMedia';
 
 export const dynamic = 'force-dynamic';
 
@@ -245,7 +246,7 @@ export async function GET(
       images: {
         // Legacy string fields (unchanged for old clients)
         primaryImageUrl: primaryMedia?.url ?? null,
-        additionalImageUrls: additionalMedia.map((m) => m.url),
+        additionalImageUrls: imageMediaUrls(additionalMedia),
         // New media objects with mediaType
         primaryMedia,
         additionalMedia,

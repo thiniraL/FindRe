@@ -48,3 +48,8 @@ export function mediaItemUrl(
 export function mediaItemUrls(items: PropertyMediaItem[]): string[] {
   return items.map((item) => item.url);
 }
+
+/** Legacy additionalImageUrls: images only — videos belong in additionalMedia. */
+export function imageMediaUrls(items: PropertyMediaItem[]): string[] {
+  return items.filter((item) => item.mediaType === 'image').map((item) => item.url);
+}

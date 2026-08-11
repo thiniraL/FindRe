@@ -7,7 +7,7 @@ import { validateQuery } from '@/lib/security/validation';
 import { getLastAnalyzedAtForSession, getPreferencesForFeed } from '@/lib/db/queries/preferences';
 import { feedPrefsCache } from '@/lib/cache';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
-import { zipMediaUrls, toMediaItem } from '@/lib/search/propertyMedia';
+import { zipMediaUrls, toMediaItem, imageMediaUrls } from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import { typesenseSearch } from '@/lib/search/typesense';
 import { verifyAccessToken } from '@/lib/auth/jwt';
@@ -268,7 +268,7 @@ function docToFeedItem(
         : null,
       isFeatured,
       featuredRank: isFeatured ? (d.featured_rank ?? null) : null,
-      additionalImageUrls: additionalMedia.map((m) => m.url),
+      additionalImageUrls: imageMediaUrls(additionalMedia),
       primaryMedia,
       additionalMedia,
       purposeKey: d.purpose_key ?? null,
