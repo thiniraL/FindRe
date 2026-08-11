@@ -9,6 +9,7 @@ import {
 import { featuredQuerySchema, validateQuery } from '@/lib/security/validation';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
 import { toMediaItem } from '@/lib/search/propertyMedia';
+import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import { typesenseSearch } from '@/lib/search/typesense';
 
 function getLanguageCode(request: NextRequest): string {
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
         rank: d.featured_rank ?? null,
         property: {
           id: Number(d.property_id),
-          title: lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
+          title: pickLocalizedTitle(lang, d.title_en, d.title_ar),
           description: null,
           price: d.price ?? null,
           currency: null,

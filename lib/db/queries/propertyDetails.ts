@@ -1,4 +1,5 @@
 import { query } from '@/lib/db/client';
+import { sqlLocalizedTitle } from '@/lib/search/unwrapTitle';
 
 export type PropertyDetailRow = {
   property_id: number;
@@ -74,7 +75,7 @@ export async function getPropertyById(
     `
     SELECT
       p.property_id,
-      COALESCE(p.title_translations->>$2, p.title_translations->>'en') AS title,
+      ${sqlLocalizedTitle('$2')} AS title,
       COALESCE(p.description_translations->>$2, p.description_translations->>'en') AS description,
       p.price::float AS price,
       p.reference_number,

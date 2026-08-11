@@ -7,6 +7,7 @@ import { validateQuery } from '@/lib/security/validation';
 import { getLikedPropertyIds } from '@/lib/db/queries/propertyViews';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
 import { zipMediaUrls, toMediaItem } from '@/lib/search/propertyMedia';
+import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import { typesenseSearch } from '@/lib/search/typesense';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 
@@ -118,7 +119,7 @@ function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): Favouri
   return {
     property: {
       id: Number(d.property_id),
-      title: lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
+      title: pickLocalizedTitle(lang, d.title_en, d.title_ar),
       location,
       price: d.price ?? null,
       area: d.area_sqm ?? null,

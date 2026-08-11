@@ -14,6 +14,7 @@ import {
 import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
 import { propertyDetailCache } from '@/lib/cache';
 import { verifyAccessToken } from '@/lib/auth/jwt';
+import { unwrapTitle } from '@/lib/search/unwrapTitle';
 
 export const dynamic = 'force-dynamic';
 
@@ -211,7 +212,7 @@ export async function GET(
 
     const payload = {
       id: row.property_id,
-      title: row.title ?? null,
+      title: unwrapTitle(row.title),
       description: row.description ?? null,
       price: row.price ?? null,
       currency: {

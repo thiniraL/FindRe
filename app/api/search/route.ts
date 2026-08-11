@@ -4,6 +4,7 @@ import { validateQuery, validateBody } from '@/lib/security/validation';
 import { searchQuerySchema, searchBodySchema, agentIdFilterEntrySchema, normalizeAgentIds } from '@/lib/security/validation';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
 import { zipMediaUrls, toMediaItem } from '@/lib/search/propertyMedia';
+import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import {
   buildFilterBy,
   buildSearchQuery,
@@ -285,10 +286,7 @@ async function mapHitsToItems(
     return {
       property: {
         id: pid,
-        title:
-          lang === 'ar'
-            ? d.title_ar ?? d.title_en ?? null
-            : d.title_en ?? d.title_ar ?? null,
+        title: pickLocalizedTitle(lang, d.title_en, d.title_ar),
         location,
         price: d.price ?? null,
         area: d.area_sqm ?? null,

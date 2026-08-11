@@ -143,6 +143,21 @@ function priceStr(
   return code ? `${num} ${num} ${code}` : num;
 }
 
+function unwrapTitle(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed) as { title?: unknown };
+      if (typeof parsed?.title === 'string' && parsed.title.trim()) return parsed.title;
+    } catch {
+      // keep original
+    }
+  }
+  return value;
+}
+
 function getTypesenseBaseUrl(): string {
   const host = mustGetEnv('TYPESENSE_HOST');
   const protocol = (Deno.env.get('TYPESENSE_PROTOCOL') || 'https').trim();
@@ -619,8 +634,16 @@ serve(async (req) => {
                 COALESCE(a.updated_at, p.updated_at),
                 COALESCE(ag.updated_at, p.updated_at)
               ) AS updated_at,
-              p.title_translations->>'en' AS title_en,
-              p.title_translations->>'ar' AS title_ar,
+              CASE
+                WHEN jsonb_typeof(p.title_translations->'en') = 'object'
+                  THEN NULLIF(p.title_translations->'en'->>'title', '')
+                ELSE NULLIF(p.title_translations->>'en', '')
+              END AS title_en,
+              CASE
+                WHEN jsonb_typeof(p.title_translations->'ar') = 'object'
+                  THEN NULLIF(p.title_translations->'ar'->>'title', '')
+                ELSE NULLIF(p.title_translations->>'ar', '')
+              END AS title_ar,
               l.translations->'en'->>'city' AS city_en,
               l.translations->'en'->>'area' AS area_en,
               l.translations->'en'->>'community' AS community_en
@@ -819,8 +842,8 @@ serve(async (req) => {
               featured_rank: featuredRank,
               created_at: createdAt,
               updated_at: updatedAt,
-              title_en: r.title_en,
-              title_ar: r.title_ar,
+              title_en: unwrapTitle(r.title_en),
+              title_ar: unwrapTitle(r.title_ar),
               city_en: r.city_en,
               area_en: r.area_en,
               community_en: r.community_en,

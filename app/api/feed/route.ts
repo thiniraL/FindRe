@@ -8,6 +8,7 @@ import { getLastAnalyzedAtForSession, getPreferencesForFeed } from '@/lib/db/que
 import { feedPrefsCache } from '@/lib/cache';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
 import { zipMediaUrls, toMediaItem } from '@/lib/search/propertyMedia';
+import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import { typesenseSearch } from '@/lib/search/typesense';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
@@ -242,7 +243,7 @@ function docToFeedItem(
   return {
     property: {
       id: Number(d.property_id),
-      title: lang === 'ar' ? d.title_ar ?? d.title_en ?? null : d.title_en ?? d.title_ar ?? null,
+      title: pickLocalizedTitle(lang, d.title_en, d.title_ar),
       location,
       price: d.price ?? null,
       area: d.area_sqm ?? null,

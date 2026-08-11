@@ -437,7 +437,7 @@ CREATE TABLE business.COMPANIES (
 -- ============================================
 CREATE TABLE property.PROPERTIES (
     property_id SERIAL PRIMARY KEY,
-    -- Translations: {"en": {"title": "...", "description": "..."}, "ar": {...}}
+    -- Translations: {"en": "English title", "ar": "Arabic title"}
     title_translations JSONB NOT NULL,
     description_translations JSONB,
     

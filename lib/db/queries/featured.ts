@@ -1,4 +1,5 @@
 import { query } from '@/lib/db/client';
+import { sqlLocalizedTitle } from '@/lib/search/unwrapTitle';
 
 export type FeaturedPropertyRow = {
   rank: number;
@@ -45,7 +46,7 @@ export async function getFeaturedProperties(options: {
     `
     SELECT
       p.property_id,
-      COALESCE(p.title_translations->>$3, p.title_translations->>'en') AS title,
+      ${sqlLocalizedTitle('$3')} AS title,
       COALESCE(p.description_translations->>$3, p.description_translations->>'en') AS description,
       p.price,
       p.status,
