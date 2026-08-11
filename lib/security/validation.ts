@@ -59,6 +59,19 @@ export const resetPasswordSchema = z.object({
   path: ['confirmPassword'],
 });
 
+/** Logged-in user changing their own password */
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+  confirmPassword: z.string().min(1, 'Confirm password is required'),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: "Passwords don't match",
+  path: ['confirmPassword'],
+}).refine((data) => data.currentPassword !== data.newPassword, {
+  message: 'New password must be different from current password',
+  path: ['newPassword'],
+});
+
 // User management schemas
 export const updateUserSchema = z.object({
   email: z.string().email('Invalid email address').optional(),

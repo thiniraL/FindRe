@@ -114,6 +114,12 @@ export interface PasswordResetConfirm {
   confirmPassword: string;
 }
 
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
 export interface EmailVerificationRequest {
   token: string;
 }

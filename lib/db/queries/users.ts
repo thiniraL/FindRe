@@ -94,6 +94,38 @@ export async function getUserById(userId: string): Promise<User | null> {
 }
 
 /**
+ * Get user by ID including password hash (for change-password)
+ */
+export async function getUserByIdWithPassword(userId: string): Promise<UserWithPassword | null> {
+  const result = await query<UserWithPassword>(
+    'SELECT * FROM login.users WHERE id = $1',
+    [userId]
+  );
+
+  return result.rows[0] || null;
+}
+
+/**
+ * Update password for an authenticated user
+ */
+export async function updateUserPassword(userId: string, newPassword: string): Promise<User> {
+  const passwordHash = await hashPassword(newPassword);
+  const result = await query<User>(
+    `UPDATE login.users
+     SET password_hash = $1
+     WHERE id = $2
+     RETURNING ${USER_COLUMNS}`,
+    [passwordHash, userId]
+  );
+
+  if (!result.rows[0]) {
+    throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+  }
+
+  return result.rows[0];
+}
+
+/**
  * Get user by email (with password hash for authentication)
  */
 export async function getUserByEmail(email: string): Promise<UserWithPassword | null> {
