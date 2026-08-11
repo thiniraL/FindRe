@@ -9,7 +9,7 @@ import {
   buildKeywordOrQueries,
   needsKeywordOrSearch,
 } from './buildFilterQuery';
-import { PROPERTIES_QUERY_BY } from './typesenseSchema';
+import { getSearchQueryBy } from './typesenseSchema';
 import { typesenseSearch, typesenseMultiSearchUnion } from './typesense';
 import { getTypesenseNlQuery } from './naturalLanguageQuery';
 
@@ -40,6 +40,7 @@ export async function runSearchCount(
   const state = { ...filterState };
   const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
   const filterBy = buildFilterBy(state);
+  const queryBy = getSearchQueryBy(state.location, useNl);
 
   if (!useNl && needsKeywordOrSearch(state)) {
     const qs = buildKeywordOrQueries(state);
@@ -48,7 +49,7 @@ export async function runSearchCount(
       qs.map((q) => ({
         collection: 'properties',
         q,
-        queryBy: PROPERTIES_QUERY_BY,
+        queryBy,
         filterBy: filterBy ?? undefined,
         sortBy,
         page: 1,
@@ -64,7 +65,7 @@ export async function runSearchCount(
   const resp = await typesenseSearch<{ property_id: string }>({
     collection: 'properties',
     q,
-    queryBy: PROPERTIES_QUERY_BY,
+    queryBy,
     filterBy: filterBy ?? undefined,
     sortBy,
     page: 1,

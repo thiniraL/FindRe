@@ -126,3 +126,17 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
 export const PROPERTIES_QUERY_BY =
   'title_en,title_ar,address,city_en,area_en,community_en,purpose_key,property_type_en,property_type_keys,property_type_names_en,main_property_type_keys,main_property_type_names_en,features,currency_code,currency_en,currency_symbol,bedrooms_str,bathrooms_str,area_sqm_str,area_sqft_str,price_str,agent_name,agency_name';
 
+/**
+ * Location filter (`location: "Dubai Marina"`) — LIKE-style token match on address
+ * (and city/area/community). Does not search title/agent/features.
+ * e.g. address "Tesdjf Dubai Marina Testch" matches q "Dubai Marina".
+ */
+export const LOCATION_QUERY_BY = 'address,city_en,area_en,community_en';
+
+/** Use address-scoped query_by when location is set; NL always uses the full field list. */
+export function getSearchQueryBy(location?: string, useNl = false): string {
+  if (useNl) return PROPERTIES_QUERY_BY;
+  if (location?.trim()) return LOCATION_QUERY_BY;
+  return PROPERTIES_QUERY_BY;
+}
+

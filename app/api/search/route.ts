@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors';
 import { validateQuery, validateBody } from '@/lib/security/validation';
 import { searchQuerySchema, searchBodySchema, agentIdFilterEntrySchema, normalizeAgentIds } from '@/lib/security/validation';
-import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
+import { getSearchQueryBy } from '@/lib/search/typesenseSchema';
 import { zipMediaUrls, toMediaItem, imageMediaUrls, withTempTestVideo } from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import {
@@ -226,6 +226,7 @@ async function runSearch(
   const lang = getLanguageCode(request);
   const useNl = !!(nlOptions?.useNlQuery && nlOptions?.nlModelId);
   const filterBy = buildFilterBy(filterState);
+  const queryBy = getSearchQueryBy(filterState.location, useNl);
 
   // Multiple keyword chips → OR via multi-search union (skip NL for this path)
   if (!useNl && needsKeywordOrSearch(filterState)) {
@@ -235,7 +236,7 @@ async function runSearch(
       qs.map((q) => ({
         collection: 'properties',
         q,
-        queryBy: PROPERTIES_QUERY_BY,
+        queryBy,
         filterBy: filterBy ?? undefined,
         sortBy,
         page,
@@ -257,7 +258,7 @@ async function runSearch(
   const resp = await typesenseSearch<TypesensePropertyDoc>({
     collection: 'properties',
     q,
-    queryBy: PROPERTIES_QUERY_BY,
+    queryBy,
     filterBy: filterBy ?? undefined,
     sortBy,
     page,

@@ -134,7 +134,7 @@ Search follows this flow:
 **Frontend:** send the natural-language sentence as `q` (e.g. `GET /api/search?q=3+bed+villa+with+pool+in+Costa+Blanca`). Do not re-parse locally; Typesense handles NL. See `searchQuerySchema` in `lib/security/validation.ts` for supported params.
 
 **Filter sources (current):**
-- **Location** – From `property.PROPERTIES.address` only. Typesense indexes `address` (and optional `city_en`, `area_en`, `community_en` when `property.LOCATIONS` is used). Search/filter do not rely on `property.LOCATIONS`; location is address-based full-text.
+- **Location** – `location` is full-text `q` with `query_by` limited to `address,city_en,area_en,community_en` (LIKE-style token match, e.g. address `Tesdjf Dubai Marina Testch` matches `Dubai Marina`). Not an exact `filter_by` / `location_id` filter.
 - **Features** – From `property.PROPERTY_DETAILS.features` (JSONB array of string keys, e.g. `["pool","garden"]`). Filter keys (e.g. `pool`, `ac`) must match values stored in that column. `property.FEATURES` and `property.PROPERTY_FEATURES` are not used for search/filter.
 
 ### Property Domain
