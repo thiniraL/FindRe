@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     try {
       viewRow = await upsertPropertyView({
         sessionId,
-        userId: userId ?? session.user_id,
+        userId: session.user_id,
         propertyId: body.propertyId,
         viewedAtIso: viewedAt,
         viewDurationSeconds: body.viewDurationSeconds,

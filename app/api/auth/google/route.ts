@@ -7,7 +7,8 @@ import { generateTokens } from '@/lib/auth/jwt';
 import { createRefreshToken } from '@/lib/db/queries/tokens';
 import { getUserByEmail, createUser, updateUser, updateLastLogin } from '@/lib/db/queries/users';
 import { getUserRole } from '@/lib/authz/permissions';
-import { attachSessionOnAuth } from '@/lib/db/queries/sessions';
+import { linkSessionToUser, createOrUpdateUserSession } from '@/lib/db/queries/sessions';
+import { mergeGuestViewsIntoUser } from '@/lib/db/queries/propertyViews';
 import { getUserIdentityByProvider, upsertUserIdentity } from '@/lib/db/queries/identities';
 import * as crypto from 'crypto';
 import { User } from '@/lib/types/auth';
@@ -150,14 +151,23 @@ async function handler(request: NextRequest) {
 
     await updateLastLogin(user.id);
 
-    const sessionAttach = await attachSessionOnAuth({
-      requestedSessionId: body.sessionId,
-      userId: user.id,
-      ipAddress,
-      userAgent,
-      languageCode: detectedLanguage,
-      preferredLanguageCode: user.preferred_language_code || detectedLanguage,
-    });
+    if (body.sessionId) {
+      await linkSessionToUser(
+        body.sessionId,
+        user.id,
+        user.preferred_language_code || undefined
+      );
+      await mergeGuestViewsIntoUser(body.sessionId, user.id);
+    } else {
+      const sessionId = crypto.randomUUID();
+      await createOrUpdateUserSession(sessionId, {
+        userId: user.id,
+        ipAddress,
+        userAgent,
+        languageCode: detectedLanguage,
+        preferredLanguageCode: user.preferred_language_code || detectedLanguage,
+      });
+    }
 
     return createSuccessResponse({
       user: {
@@ -166,8 +176,6 @@ async function handler(request: NextRequest) {
         emailVerified: user.email_verified,
         preferredLanguageCode: user.preferred_language_code,
       },
-      sessionId: sessionAttach.sessionId,
-      sessionRotated: sessionAttach.sessionRotated,
       tokens: {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,

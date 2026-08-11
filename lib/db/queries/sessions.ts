@@ -1,40 +1,26 @@
 import { query } from '@/lib/db/client';
 import { UserSession } from '@/lib/types/auth';
-import { mergeGuestViewsIntoUser } from '@/lib/db/queries/propertyViews';
-import * as crypto from 'crypto';
-
-export type SessionCreateOptions = {
-  userId?: string | null;
-  ipAddress?: string | null;
-  userAgent?: string | null;
-  countryCode?: string | null;
-  languageCode?: string | null;
-  preferredLanguageCode?: string | null;
-};
-
-export type AuthSessionAttachResult = {
-  sessionId: string;
-  /** Requested session belonged to another user, so a new id was created. */
-  sessionRotated: boolean;
-};
 
 /**
- * Create or update user session (supports both authenticated and anonymous users).
- * Never reassigns a session that already belongs to a different user.
+ * Create or update user session (supports both authenticated and anonymous users)
  */
 export async function createOrUpdateUserSession(
   sessionId: string,
-  options: SessionCreateOptions
+  options: {
+    userId?: string | null;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+    countryCode?: string | null;
+    languageCode?: string | null;
+    preferredLanguageCode?: string | null;
+  }
 ): Promise<UserSession> {
   const result = await query<UserSession>(
     `INSERT INTO user_activity.user_sessions
      (session_id, user_id, ip_address, user_agent, country_code, language_code, preferred_language_code, last_activity_at, is_active)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
      ON CONFLICT (session_id)
-     DO UPDATE SET user_id = CASE
-                     WHEN user_activity.user_sessions.user_id IS NULL THEN EXCLUDED.user_id
-                     ELSE user_activity.user_sessions.user_id
-                   END,
+     DO UPDATE SET user_id = COALESCE(EXCLUDED.user_id, user_activity.user_sessions.user_id),
                    ip_address = COALESCE(EXCLUDED.ip_address, user_activity.user_sessions.ip_address),
                    user_agent = COALESCE(EXCLUDED.user_agent, user_activity.user_sessions.user_agent),
                    country_code = COALESCE(EXCLUDED.country_code, user_activity.user_sessions.country_code),
@@ -71,14 +57,13 @@ export async function getUserSession(sessionId: string): Promise<UserSession | n
 }
 
 /**
- * Link session to user (when user logs in).
- * Only links guest sessions (user_id IS NULL) or the same user.
+ * Link session to user (when user logs in)
  */
 export async function linkSessionToUser(
   sessionId: string,
   userId: string,
   preferredLanguageCode?: string
-): Promise<UserSession | null> {
+): Promise<UserSession> {
   const result = await query<UserSession>(
     `UPDATE user_activity.user_sessions
      SET user_id = $2,
@@ -86,61 +71,11 @@ export async function linkSessionToUser(
          preferred_language_code = COALESCE($4, preferred_language_code),
          language_code = COALESCE($4, language_code)
      WHERE session_id = $1
-       AND (user_id IS NULL OR user_id = $2)
      RETURNING *`,
     [sessionId, userId, new Date().toISOString(), preferredLanguageCode || null]
   );
 
-  return result.rows[0] || null;
-}
-
-/**
- * Bind an auth login to a session.
- * Guest session (no user) or same user → reuse.
- * Session already mapped to another user → mint a new session id.
- */
-export async function attachSessionOnAuth(options: {
-  requestedSessionId?: string | null;
-  userId: string;
-  ipAddress?: string | null;
-  userAgent?: string | null;
-  languageCode?: string | null;
-  preferredLanguageCode?: string | null;
-}): Promise<AuthSessionAttachResult> {
-  const requested = options.requestedSessionId?.trim() || null;
-  const createOpts: SessionCreateOptions = {
-    userId: options.userId,
-    ipAddress: options.ipAddress,
-    userAgent: options.userAgent,
-    languageCode: options.languageCode,
-    preferredLanguageCode: options.preferredLanguageCode,
-  };
-
-  if (requested) {
-    const existing = await getUserSession(requested);
-    const canReuse =
-      !existing || !existing.user_id || existing.user_id === options.userId;
-
-    if (canReuse) {
-      if (existing?.user_id === options.userId) {
-        await linkSessionToUser(
-          requested,
-          options.userId,
-          options.preferredLanguageCode || undefined
-        );
-      } else {
-        await createOrUpdateUserSession(requested, createOpts);
-        if (existing && !existing.user_id) {
-          await mergeGuestViewsIntoUser(requested, options.userId);
-        }
-      }
-      return { sessionId: requested, sessionRotated: false };
-    }
-  }
-
-  const sessionId = crypto.randomUUID();
-  await createOrUpdateUserSession(sessionId, createOpts);
-  return { sessionId, sessionRotated: Boolean(requested) };
+  return result.rows[0];
 }
 
 /**
