@@ -593,7 +593,7 @@ serve(async (req) => {
               pur.purpose_key,
               (p.property_type_ids)[1] AS property_type_id,
               p.property_type_ids,
-              p.main_property_type_ids,
+              resolved_mpt.main_property_type_ids,
               pt_primary.type_key AS property_type_key,
               pt_primary.name_translations->>'en' AS property_type_en,
               pt_all.property_type_keys,
@@ -664,10 +664,21 @@ serve(async (req) => {
               JOIN property.PROPERTY_TYPES pt ON pt.type_id = tid
             ) pt_all ON TRUE
             LEFT JOIN LATERAL (
+              SELECT COALESCE(
+                NULLIF(p.main_property_type_ids, '{}'),
+                (
+                  SELECT ARRAY_AGG(DISTINCT m ORDER BY m)
+                  FROM property.PROPERTY_TYPES pt
+                  CROSS JOIN LATERAL unnest(COALESCE(pt.main_property_type_ids, '{}')) AS m
+                  WHERE pt.type_id = ANY(COALESCE(p.property_type_ids, '{}'))
+                )
+              ) AS main_property_type_ids
+            ) resolved_mpt ON TRUE
+            LEFT JOIN LATERAL (
               SELECT
                 ARRAY_AGG(mpt.main_type_key ORDER BY mpt.main_type_id) AS main_property_type_keys,
                 ARRAY_AGG(COALESCE(mpt.name_translations->>'en', mpt.main_type_key) ORDER BY mpt.main_type_id) AS main_property_type_names_en
-              FROM unnest(COALESCE(p.main_property_type_ids, '{}')) AS mid
+              FROM unnest(COALESCE(resolved_mpt.main_property_type_ids, '{}')) AS mid
               JOIN property.MAIN_PROPERTY_TYPES mpt ON mpt.main_type_id = mid
             ) mpt_all ON TRUE
           )
@@ -780,14 +791,15 @@ serve(async (req) => {
             const createdAt = Math.floor(new Date(r.created_at).getTime() / 1000);
             const updatedAt =
               typeof r.updated_epoch === 'bigint' ? Number(r.updated_epoch) : r.updated_epoch;
-            const mainPropertyTypeIds =
-              r.main_property_type_ids?.length ? r.main_property_type_ids : [1];
-            const mainPropertyTypeKeys =
-              r.main_property_type_keys?.length ? r.main_property_type_keys : ['residential'];
-            const mainPropertyTypeNamesEn =
-              r.main_property_type_names_en?.length
-                ? r.main_property_type_names_en
-                : ['Residential'];
+            const mainPropertyTypeIds = r.main_property_type_ids?.length
+              ? r.main_property_type_ids
+              : null;
+            const mainPropertyTypeKeys = r.main_property_type_keys?.length
+              ? r.main_property_type_keys
+              : null;
+            const mainPropertyTypeNamesEn = r.main_property_type_names_en?.length
+              ? r.main_property_type_names_en
+              : null;
             return {
               id: String(r.property_id),
               property_id: String(r.property_id),

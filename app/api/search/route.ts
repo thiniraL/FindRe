@@ -40,6 +40,13 @@ type TypesensePropertyDoc = {
   purpose_id?: number;
   purpose_key?: string;
   property_type_id?: number;
+  property_type_ids?: number[];
+  property_type_en?: string;
+  property_type_keys?: string[];
+  property_type_names_en?: string[];
+  main_property_type_ids?: number[];
+  main_property_type_keys?: string[];
+  main_property_type_names_en?: string[];
   price?: number;
   currency_id?: number;
   bedrooms?: number;
@@ -313,6 +320,14 @@ async function mapHitsToItems(
         primaryMedia,
         additionalMedia,
         purposeKey: d.purpose_key ?? null,
+        mainPropertyTypeIds: d.main_property_type_ids ?? [],
+        mainPropertyTypeKeys: d.main_property_type_keys ?? [],
+        propertyTypeIds: d.property_type_ids?.length
+          ? d.property_type_ids
+          : d.property_type_id != null
+            ? [d.property_type_id]
+            : [],
+        propertyType: d.property_type_en ?? null,
         isLiked: false,
       },
     };
