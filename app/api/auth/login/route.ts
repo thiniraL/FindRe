@@ -10,9 +10,7 @@ import { loginSchema } from '@/lib/security/validation';
 import { getUserRole } from '@/lib/authz/permissions';
 import { roleNameCache } from '@/lib/authz/cache';
 import { AppError } from '@/lib/utils/errors';
-import { linkSessionToUser, createOrUpdateUserSession } from '@/lib/db/queries/sessions';
-import { mergeGuestViewsIntoUser } from '@/lib/db/queries/propertyViews';
-import * as crypto from 'crypto';
+import { attachSessionOnAuth } from '@/lib/db/queries/sessions';
 
 const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
 
@@ -95,26 +93,18 @@ async function handler(request: NextRequest) {
                      'unknown';
     const userAgent = request.headers.get('user-agent') || undefined;
 
-    const sessionId = body.sessionId ?? crypto.randomUUID();
-    const sessionPromise = body.sessionId
-      ? linkSessionToUser(
-          body.sessionId,
-          user.id,
-          user.preferred_language_code || undefined
-        )
-      : (() => {
-          const acceptLanguage = request.headers.get('accept-language') || 'en';
-          const detectedLanguage = acceptLanguage.split(',')[0]?.split('-')[0] || 'en';
-          return createOrUpdateUserSession(sessionId, {
-            userId: user.id,
-            ipAddress,
-            userAgent,
-            languageCode: detectedLanguage,
-            preferredLanguageCode: user.preferred_language_code || detectedLanguage,
-          });
-        })();
+    const acceptLanguage = request.headers.get('accept-language') || 'en';
+    const detectedLanguage = acceptLanguage.split(',')[0]?.split('-')[0] || 'en';
 
-    await Promise.all([
+    const [sessionAttach] = await Promise.all([
+      attachSessionOnAuth({
+        requestedSessionId: body.sessionId,
+        userId: user.id,
+        ipAddress,
+        userAgent,
+        languageCode: detectedLanguage,
+        preferredLanguageCode: user.preferred_language_code || detectedLanguage,
+      }),
       createRefreshToken(
         user.id,
         tokens.refreshToken,
@@ -124,12 +114,7 @@ async function handler(request: NextRequest) {
         userAgent
       ),
       updateLastLogin(user.id),
-      sessionPromise,
     ]);
-
-    if (body.sessionId) {
-      await mergeGuestViewsIntoUser(body.sessionId, user.id);
-    }
 
     return createSuccessResponse({
       user: {
@@ -138,7 +123,8 @@ async function handler(request: NextRequest) {
         emailVerified: user.email_verified,
         preferredLanguageCode: user.preferred_language_code,
       },
-      sessionId,
+      sessionId: sessionAttach.sessionId,
+      sessionRotated: sessionAttach.sessionRotated,
       tokens: {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
