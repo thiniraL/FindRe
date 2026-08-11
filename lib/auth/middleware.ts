@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { verifyAccessToken, JWTPayload } from '@/lib/auth/jwt';
-import { AppError } from '@/lib/utils/errors';
+import { AppError, createErrorResponse } from '@/lib/utils/errors';
 
 export interface AuthenticatedRequest extends NextRequest {
   user?: JWTPayload;
@@ -47,8 +47,12 @@ export function withAuth<T extends unknown[]>(
   handler: (request: NextRequest, user: JWTPayload, ...args: T) => Promise<Response>
 ) {
   return async (request: NextRequest, ...args: T): Promise<Response> => {
-    const user = await authenticateRequest(request);
-    return handler(request, user, ...args);
+    try {
+      const user = await authenticateRequest(request);
+      return await handler(request, user, ...args);
+    } catch (error) {
+      return createErrorResponse(error);
+    }
   };
 }
 

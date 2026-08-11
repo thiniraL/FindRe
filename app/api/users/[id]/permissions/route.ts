@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getUserPermissions, getUserRole } from '@/lib/authz/permissions';
 import { getUserDirectPermissions } from '@/lib/db/queries/roles';
-import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
+import { AppError, createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateParams } from '@/lib/security/validation';
 import { userIdSchema } from '@/lib/security/validation';
 import { withAuth } from '@/lib/auth/middleware';
@@ -13,11 +13,12 @@ async function handler(
   { params }: { params: { id: string } }
 ) {
   try {
+    void request;
     const { id } = validateParams(params, userIdSchema);
 
     // Users can view their own permissions
     if (id !== user.userId) {
-      return createErrorResponse(new Error('Forbidden'));
+      throw new AppError('Forbidden', 403, 'FORBIDDEN');
     }
 
     const [allPermissions, role, directPermissions] = await Promise.all([

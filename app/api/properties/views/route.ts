@@ -65,16 +65,33 @@ export async function POST(request: NextRequest) {
     const viewedAt =
       body.viewedAt ? new Date(body.viewedAt).toISOString() : new Date().toISOString();
 
-    const viewRow = await upsertPropertyView({
-      sessionId,
-      userId: session.user_id,
-      propertyId: body.propertyId,
-      viewedAtIso: viewedAt,
-      viewDurationSeconds: body.viewDurationSeconds,
-      ipAddress,
-      userAgent,
-      is_like: body.is_like,
-    });
+    let viewRow;
+    try {
+      viewRow = await upsertPropertyView({
+        sessionId,
+        userId: session.user_id,
+        propertyId: body.propertyId,
+        viewedAtIso: viewedAt,
+        viewDurationSeconds: body.viewDurationSeconds,
+        ipAddress,
+        userAgent,
+        is_like: body.is_like,
+      });
+    } catch (error) {
+      // Missing property_id → FK violation on property.property_views
+      const pgCode =
+        error && typeof error === 'object' && 'code' in error
+          ? String((error as { code?: unknown }).code)
+          : '';
+      if (pgCode === '23503') {
+        throw new AppError(
+          `Property ${body.propertyId} not found`,
+          404,
+          'PROPERTY_NOT_FOUND'
+        );
+      }
+      throw error;
+    }
 
     await bumpSessionActivityAndViews(sessionId);
 

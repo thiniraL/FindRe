@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getRoleById, updateRole, deleteRole } from '@/lib/db/queries/roles';
-import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
+import { AppError, createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateParams, validateBody } from '@/lib/security/validation';
 import { roleIdSchema, updateRoleSchema } from '@/lib/security/validation';
 import { withAuthorization, requirePermission } from '@/lib/authz/middleware';
@@ -12,11 +12,13 @@ async function getHandler(
   { params }: { params: { id: string } }
 ) {
   try {
+    void request;
+    void user;
     const { id } = validateParams(params, roleIdSchema);
     const role = await getRoleById(id);
 
     if (!role) {
-      return createErrorResponse(new Error('Role not found'));
+      throw new AppError('Role not found', 404, 'ROLE_NOT_FOUND');
     }
 
     return createSuccessResponse({ role });

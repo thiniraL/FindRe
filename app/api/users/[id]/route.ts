@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getUserById } from '@/lib/db/queries/users';
-import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
+import { AppError, createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateParams } from '@/lib/security/validation';
 import { userIdSchema } from '@/lib/security/validation';
 import { withAuth } from '@/lib/auth/middleware';
@@ -13,19 +13,20 @@ async function handler(
   { params }: { params: { id: string } }
 ) {
   try {
+    void request;
     const { id } = validateParams(params, userIdSchema);
 
     // Users can view their own profile, or need user:read permission
     if (id !== user.userId) {
       const hasAccess = await hasPermission(user.userId, 'user', 'read');
       if (!hasAccess) {
-        return createErrorResponse(new Error('Insufficient permissions'));
+        throw new AppError('Insufficient permissions', 403, 'FORBIDDEN');
       }
     }
 
     const targetUser = await getUserById(id);
     if (!targetUser) {
-      return createErrorResponse(new Error('User not found'));
+      throw new AppError('User not found', 404, 'USER_NOT_FOUND');
     }
 
     return createSuccessResponse({

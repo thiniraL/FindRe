@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getUserById, updateUser } from '@/lib/db/queries/users';
-import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
+import { AppError, createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { updateUserSchema } from '@/lib/security/validation';
 import { withAuth } from '@/lib/auth/middleware';
@@ -11,7 +11,7 @@ async function handler(request: NextRequest, user: JWTPayload) {
     if (request.method === 'GET') {
       const currentUser = await getUserById(user.userId);
       if (!currentUser) {
-        return createErrorResponse(new Error('User not found'));
+        throw new AppError('User not found', 404, 'USER_NOT_FOUND');
       }
 
       return createSuccessResponse({
@@ -66,7 +66,7 @@ async function handler(request: NextRequest, user: JWTPayload) {
       });
     }
 
-    return createErrorResponse(new Error('Method not allowed'));
+    throw new AppError('Method not allowed', 405, 'METHOD_NOT_ALLOWED');
   } catch (error) {
     return createErrorResponse(error);
   }
