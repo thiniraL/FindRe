@@ -7,7 +7,7 @@ import { validateQuery } from '@/lib/security/validation';
 import { getLastAnalyzedAtForSession, getPreferencesForFeed } from '@/lib/db/queries/preferences';
 import { feedPrefsCache } from '@/lib/cache';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
-import { zipMediaUrls, toMediaItem, imageMediaUrls } from '@/lib/search/propertyMedia';
+import { zipMediaUrls, toMediaItem, imageMediaUrls, withTempTestVideo } from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import { typesenseSearch } from '@/lib/search/typesense';
 import { verifyAccessToken } from '@/lib/auth/jwt';
@@ -236,9 +236,8 @@ function docToFeedItem(
     : [d.address, d.community_en, d.area_en, d.city_en].filter(Boolean);
   const location = locationParts.length ? locationParts.join(', ') : null;
   const primaryMedia = toMediaItem(d.primary_image_url, d.primary_media_type);
-  const additionalMedia = zipMediaUrls(
-    d.additional_image_urls,
-    d.additional_media_types
+  const additionalMedia = withTempTestVideo(
+    zipMediaUrls(d.additional_image_urls, d.additional_media_types)
   );
   return {
     property: {

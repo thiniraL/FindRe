@@ -15,7 +15,7 @@ import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
 import { propertyDetailCache } from '@/lib/cache';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { unwrapTitle } from '@/lib/search/unwrapTitle';
-import { imageMediaUrls } from '@/lib/search/propertyMedia';
+import { imageMediaUrls, withTempTestVideo } from '@/lib/search/propertyMedia';
 
 export const dynamic = 'force-dynamic';
 
@@ -204,12 +204,14 @@ export async function GET(
             : {}),
         }
       : null;
-    const additionalMedia = primary
-      ? orderedMedia.filter(
-          (item) =>
-            !(item.mediaType === primary.mediaType && item.url === primary.url)
-        )
-      : orderedMedia;
+    const additionalMedia = withTempTestVideo(
+      primary
+        ? orderedMedia.filter(
+            (item) =>
+              !(item.mediaType === primary.mediaType && item.url === primary.url)
+          )
+        : orderedMedia
+    );
 
     const payload = {
       id: row.property_id,

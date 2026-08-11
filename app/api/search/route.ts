@@ -3,7 +3,7 @@ import { createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors
 import { validateQuery, validateBody } from '@/lib/security/validation';
 import { searchQuerySchema, searchBodySchema, agentIdFilterEntrySchema, normalizeAgentIds } from '@/lib/security/validation';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
-import { zipMediaUrls, toMediaItem, imageMediaUrls } from '@/lib/search/propertyMedia';
+import { zipMediaUrls, toMediaItem, imageMediaUrls, withTempTestVideo } from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import {
   buildFilterBy,
@@ -286,9 +286,8 @@ async function mapHitsToItems(
     const locationParts = [d.address].filter(Boolean);
     const location = locationParts.length ? locationParts.join(', ') : null;
     const primaryMedia = toMediaItem(d.primary_image_url, d.primary_media_type);
-    const additionalMedia = zipMediaUrls(
-      d.additional_image_urls,
-      d.additional_media_types
+    const additionalMedia = withTempTestVideo(
+      zipMediaUrls(d.additional_image_urls, d.additional_media_types)
     );
     return {
       property: {
