@@ -238,7 +238,7 @@ async function runSearch(
     return mapHitsToItems(resp, lang, request);
   }
 
-  // NL mode: send the original natural-language sentence to Typesense (nl_query + nl_model_id).
+  // NL mode: map currency symbols → ISO codes, then send to Typesense (nl_query + nl_model_id).
   const q = useNl
     ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '')
     : buildSearchQuery(filterState);
