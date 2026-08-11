@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS login.users (
     password_hash VARCHAR(255) NOT NULL,
     email_verified BOOLEAN DEFAULT FALSE NOT NULL,
     email_verification_token VARCHAR(255) NULL,
+    email_verification_expires TIMESTAMP NULL,
     password_reset_token VARCHAR(255) NULL,
     password_reset_expires TIMESTAMP NULL,
     two_factor_secret VARCHAR(255) NULL,

@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import {
   createUserWithVerificationToken,
   deleteUserById,
+  EMAIL_VERIFICATION_OTP_TTL_MS,
   getUserByEmail,
 } from '@/lib/db/queries/users';
 import { assignRoleToUser, getRoleByName } from '@/lib/db/queries/roles';
@@ -9,7 +10,7 @@ import { sendVerificationEmailWithOtp, formatEmailError } from '@/lib/email/send
 import { AppError, createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { registerSchema } from '@/lib/security/validation';
-import { roleCache, emailVerificationOtpCache } from '@/lib/cache';
+import { roleCache } from '@/lib/cache';
 import type { Role } from '@/lib/types/auth';
 import { generateVerificationOtp } from '@/lib/auth/password';
 
@@ -27,22 +28,17 @@ async function handler(request: NextRequest) {
       return createErrorResponse(new AppError('Email already exists', 409, 'EMAIL_ALREADY_EXISTS'));
     }
 
-    // Create user with language preference
+    const otp = generateVerificationOtp();
     const { user } = await createUserWithVerificationToken(
       body.email,
       body.password,
-      preferredLanguageCode
+      preferredLanguageCode,
+      otp
     );
-
-    const normalizedEmail = body.email.toLowerCase().trim();
-    const otp = generateVerificationOtp();
-    const otpCacheKey = `email_verify:${normalizedEmail}`;
-    emailVerificationOtpCache.set(otpCacheKey, otp);
 
     try {
       await sendVerificationEmailWithOtp(user.email, otp);
     } catch (err) {
-      emailVerificationOtpCache.delete(otpCacheKey);
       console.error('Failed to send verification email:', formatEmailError(err));
       await deleteUserById(user.id).catch((delErr) => {
         console.error('Failed to roll back user after email failure:', delErr);
@@ -70,6 +66,7 @@ async function handler(request: NextRequest) {
         emailVerificationRequired: true,
         message:
           'We sent a 6-digit verification code to your email. Enter it on the verify screen, then you can sign in.',
+        expiresInSeconds: Math.floor(EMAIL_VERIFICATION_OTP_TTL_MS / 1000),
         user: {
           id: user.id,
           email: user.email,

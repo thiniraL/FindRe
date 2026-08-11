@@ -3,6 +3,8 @@ import { User, UserWithPassword } from '@/lib/types/auth';
 import { hashPassword, generateToken } from '@/lib/auth/password';
 import { AppError } from '@/lib/utils/errors';
 
+export const EMAIL_VERIFICATION_OTP_TTL_MS = 10 * 60 * 1000;
+
 const USER_COLUMNS =
   'id, email, email_verified, two_factor_enabled, last_login, is_active, preferred_language_code, created_at, updated_at';
 
@@ -42,18 +44,22 @@ export async function createUser(
 export async function createUserWithVerificationToken(
   email: string,
   password: string,
-  preferredLanguageCode?: string
+  preferredLanguageCode?: string,
+  verificationOtp?: string
 ): Promise<{ user: User; emailVerificationToken: string }> {
   const passwordHash = await hashPassword(password);
-  const emailVerificationToken = generateToken();
+  const emailVerificationToken = verificationOtp || generateToken();
   const normalizedEmail = email.toLowerCase().trim();
+  const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_OTP_TTL_MS).toISOString();
 
   try {
     const result = await query<User>(
-      `INSERT INTO login.users (email, password_hash, email_verification_token, preferred_language_code)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO login.users (
+         email, password_hash, email_verification_token, email_verification_expires, preferred_language_code
+       )
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING ${USER_COLUMNS}`,
-      [normalizedEmail, passwordHash, emailVerificationToken, preferredLanguageCode || 'en']
+      [normalizedEmail, passwordHash, emailVerificationToken, expiresAt, preferredLanguageCode || 'en']
     );
 
     return { user: result.rows[0], emailVerificationToken };
@@ -183,20 +189,47 @@ export async function setPasswordResetToken(
 }
 
 /**
- * Set email verification token (for resend verification)
+ * Store email verification OTP with 10-minute expiry.
  */
 export async function setEmailVerificationToken(
   email: string,
-  token: string
+  token: string,
+  expiresAt: Date = new Date(Date.now() + EMAIL_VERIFICATION_OTP_TTL_MS)
 ): Promise<void> {
   const normalizedEmail = email.toLowerCase().trim();
   await query(
     `UPDATE login.users
      SET email_verification_token = $1,
-         email_verified = false
-     WHERE email = $2`,
-    [token, normalizedEmail]
+         email_verification_expires = $2
+     WHERE email = $3
+       AND email_verified = false`,
+    [token, expiresAt.toISOString(), normalizedEmail]
   );
+}
+
+/**
+ * Verify 6-digit email OTP (valid for 10 minutes) and mark the account verified.
+ */
+export async function verifyEmailOtp(email: string, otp: string): Promise<User> {
+  const normalizedEmail = email.toLowerCase().trim();
+  const result = await query<User>(
+    `UPDATE login.users
+     SET email_verified = true,
+         email_verification_token = NULL,
+         email_verification_expires = NULL
+     WHERE email = $1
+       AND email_verified = false
+       AND email_verification_token = $2
+       AND email_verification_expires >= $3
+     RETURNING ${USER_COLUMNS}`,
+    [normalizedEmail, otp, new Date().toISOString()]
+  );
+
+  if (!result.rows[0]) {
+    throw new AppError('Invalid or expired verification code', 400, 'INVALID_VERIFICATION_CODE');
+  }
+
+  return result.rows[0];
 }
 
 /**

@@ -63,16 +63,11 @@ export const feedPrefsCache = new SimpleCache(FEED_PREFS_TTL);
 const ROLE_CACHE_TTL = 10 * 60 * 1000;
 export const roleCache = new SimpleCache(ROLE_CACHE_TTL);
 
-// Email verification 6-digit OTP (10 min expiry)
-const EMAIL_VERIFICATION_OTP_TTL = 10 * 60 * 1000;
-export const emailVerificationOtpCache = new SimpleCache(EMAIL_VERIFICATION_OTP_TTL);
-
 if (typeof setInterval !== 'undefined') {
   setInterval(() => {
     filterConfigCache.cleanup();
     propertyDetailCache.cleanup();
     feedPrefsCache.cleanup();
     roleCache.cleanup();
-    emailVerificationOtpCache.cleanup();
   }, 10 * 60 * 1000);
 }

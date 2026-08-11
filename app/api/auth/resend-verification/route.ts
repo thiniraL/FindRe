@@ -1,23 +1,21 @@
 import { NextRequest } from 'next/server';
-import { getUserByEmail } from '@/lib/db/queries/users';
+import { getUserByEmail, setEmailVerificationToken, EMAIL_VERIFICATION_OTP_TTL_MS } from '@/lib/db/queries/users';
 import { generateVerificationOtp } from '@/lib/auth/password';
 import { sendVerificationEmailWithOtp, formatEmailError } from '@/lib/email/send';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { resendVerificationSchema } from '@/lib/security/validation';
-import { emailVerificationOtpCache } from '@/lib/cache';
 
 async function handler(request: NextRequest) {
   try {
     const body = await validateBody(request, resendVerificationSchema);
-    const normalizedEmail = body.email.toLowerCase().trim();
 
     const user = await getUserByEmail(body.email);
 
     // Always return success (security: don't reveal if email exists)
     if (user && !user.email_verified) {
       const otp = generateVerificationOtp();
-      emailVerificationOtpCache.set(`email_verify:${normalizedEmail}`, otp);
+      await setEmailVerificationToken(user.email, otp);
 
       try {
         await sendVerificationEmailWithOtp(user.email, otp);
@@ -30,6 +28,7 @@ async function handler(request: NextRequest) {
     return createSuccessResponse({
       message:
         'Check your email for a verification code. If nothing arrives, confirm the address or try again in a few minutes.',
+      expiresInSeconds: Math.floor(EMAIL_VERIFICATION_OTP_TTL_MS / 1000),
     });
   } catch (error) {
     return createErrorResponse(error);
@@ -37,10 +36,3 @@ async function handler(request: NextRequest) {
 }
 
 export const POST = handler;
-
-
-
-
-
-
-

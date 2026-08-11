@@ -1,29 +1,13 @@
 import { NextRequest } from 'next/server';
-import { getUserByEmail, updateUser } from '@/lib/db/queries/users';
+import { verifyEmailOtp } from '@/lib/db/queries/users';
 import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
-import { AppError } from '@/lib/utils/errors';
 import { validateBody } from '@/lib/security/validation';
 import { emailVerificationSchema } from '@/lib/security/validation';
-import { emailVerificationOtpCache } from '@/lib/cache';
 
 async function handler(request: NextRequest) {
   try {
     const body = await validateBody(request, emailVerificationSchema);
-    const normalizedEmail = body.email.toLowerCase().trim();
-    const cacheKey = `email_verify:${normalizedEmail}`;
-
-    const cachedOtp = emailVerificationOtpCache.get<string>(cacheKey);
-    if (!cachedOtp || cachedOtp !== body.otp) {
-      throw new AppError('Invalid or expired verification code', 400, 'INVALID_VERIFICATION_CODE');
-    }
-
-    const user = await getUserByEmail(body.email);
-    if (!user) {
-      throw new AppError('Invalid or expired verification code', 400, 'INVALID_VERIFICATION_CODE');
-    }
-
-    await updateUser(user.id, { email_verified: true });
-    emailVerificationOtpCache.delete(cacheKey);
+    const user = await verifyEmailOtp(body.email, body.otp);
 
     return createSuccessResponse({
       message: 'Email verified successfully',
@@ -39,13 +23,3 @@ async function handler(request: NextRequest) {
 }
 
 export const POST = handler;
-
-
-
-
-
-
-
-
-
-
