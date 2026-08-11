@@ -208,59 +208,96 @@ export async function getPropertyViewStatus(
 }
 
 /**
- * Get paginated list of property IDs the user/session has liked (favourites),
+ * Get paginated list of property IDs the authenticated user has liked (favourites),
  * ordered by most recently liked first (feedback_at DESC).
- * Uses user_id when provided, otherwise session_id with user_id IS NULL.
  */
 export async function getLikedPropertyIds(
-  sessionId: string,
-  userId: string | null,
+  userId: string,
   limit: number,
   offset: number
 ): Promise<{ propertyIds: number[]; total: number }> {
-  if (userId) {
-    const countRes = await query<{ c: string }>(
-      `
-      SELECT COUNT(*)::text AS c
-      FROM property.PROPERTY_VIEWS
-      WHERE user_id = $1 AND is_liked = TRUE
-      `,
-      [userId]
-    );
-    const total = parseInt(countRes.rows[0]?.c ?? '0', 10);
-    const idRes = await query<{ property_id: number }>(
-      `
-      SELECT property_id
-      FROM property.PROPERTY_VIEWS
-      WHERE user_id = $1 AND is_liked = TRUE
-      ORDER BY feedback_at DESC NULLS LAST, viewed_at DESC
-      LIMIT $2 OFFSET $3
-      `,
-      [userId, limit, offset]
-    );
-    return { propertyIds: idRes.rows.map((r) => r.property_id), total };
-  }
-
   const countRes = await query<{ c: string }>(
     `
     SELECT COUNT(*)::text AS c
     FROM property.PROPERTY_VIEWS
-    WHERE session_id = $1 AND user_id IS NULL AND is_liked = TRUE
+    WHERE user_id = $1 AND is_liked = TRUE
     `,
-    [sessionId]
+    [userId]
   );
   const total = parseInt(countRes.rows[0]?.c ?? '0', 10);
   const idRes = await query<{ property_id: number }>(
     `
     SELECT property_id
     FROM property.PROPERTY_VIEWS
-    WHERE session_id = $1 AND user_id IS NULL AND is_liked = TRUE
+    WHERE user_id = $1 AND is_liked = TRUE
     ORDER BY feedback_at DESC NULLS LAST, viewed_at DESC
     LIMIT $2 OFFSET $3
     `,
-    [sessionId, limit, offset]
+    [userId, limit, offset]
   );
   return { propertyIds: idRes.rows.map((r) => r.property_id), total };
+}
+
+/**
+ * On login, attach this session's guest views/likes (user_id IS NULL) to the account.
+ * If the user already has a row for the same property, merge like flags then drop the guest row.
+ */
+export async function mergeGuestViewsIntoUser(
+  sessionId: string,
+  userId: string
+): Promise<void> {
+  if (!sessionId.trim() || !userId) return;
+
+  // Prefer guest like when merging onto an existing account row.
+  await query(
+    `
+    UPDATE property.PROPERTY_VIEWS u
+    SET
+      is_liked = u.is_liked OR g.is_liked,
+      is_disliked = CASE
+        WHEN u.is_liked OR g.is_liked THEN FALSE
+        ELSE u.is_disliked OR g.is_disliked
+      END,
+      feedback_at = CASE
+        WHEN g.is_liked AND NOT u.is_liked THEN COALESCE(g.feedback_at, NOW() AT TIME ZONE 'UTC')
+        ELSE u.feedback_at
+      END,
+      viewed_at = GREATEST(u.viewed_at, g.viewed_at),
+      view_duration_seconds = COALESCE(u.view_duration_seconds, g.view_duration_seconds),
+      session_id = g.session_id
+    FROM property.PROPERTY_VIEWS g
+    WHERE g.session_id = $1
+      AND g.user_id IS NULL
+      AND u.user_id = $2
+      AND u.property_id = g.property_id
+    `,
+    [sessionId, userId]
+  );
+
+  await query(
+    `
+    DELETE FROM property.PROPERTY_VIEWS g
+    WHERE g.session_id = $1
+      AND g.user_id IS NULL
+      AND EXISTS (
+        SELECT 1
+        FROM property.PROPERTY_VIEWS u
+        WHERE u.user_id = $2
+          AND u.property_id = g.property_id
+      )
+    `,
+    [sessionId, userId]
+  );
+
+  await query(
+    `
+    UPDATE property.PROPERTY_VIEWS
+    SET user_id = $2
+    WHERE session_id = $1
+      AND user_id IS NULL
+    `,
+    [sessionId, userId]
+  );
 }
 
 export async function bumpSessionActivityAndViews(sessionId: string): Promise<void> {

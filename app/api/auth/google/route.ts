@@ -8,6 +8,7 @@ import { createRefreshToken } from '@/lib/db/queries/tokens';
 import { getUserByEmail, createUser, updateUser, updateLastLogin } from '@/lib/db/queries/users';
 import { getUserRole } from '@/lib/authz/permissions';
 import { linkSessionToUser, createOrUpdateUserSession } from '@/lib/db/queries/sessions';
+import { mergeGuestViewsIntoUser } from '@/lib/db/queries/propertyViews';
 import { getUserIdentityByProvider, upsertUserIdentity } from '@/lib/db/queries/identities';
 import * as crypto from 'crypto';
 import { User } from '@/lib/types/auth';
@@ -156,6 +157,7 @@ async function handler(request: NextRequest) {
         user.id,
         user.preferred_language_code || undefined
       );
+      await mergeGuestViewsIntoUser(body.sessionId, user.id);
     } else {
       const sessionId = crypto.randomUUID();
       await createOrUpdateUserSession(sessionId, {

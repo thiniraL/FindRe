@@ -63,16 +63,23 @@ function getLanguageCode(request: NextRequest): 'en' | 'ar' {
   return lang === 'ar' ? 'ar' : 'en';
 }
 
-function tryGetUserIdFromAuthHeader(request: NextRequest): string | null {
+function requireUserIdFromAuthHeader(request: NextRequest): string {
   const authHeader = request.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new AppError('Authentication required', 401, 'AUTH_REQUIRED');
+  }
   const token = authHeader.substring(7).trim();
-  if (!token) return null;
+  if (!token) {
+    throw new AppError('Authentication required', 401, 'AUTH_REQUIRED');
+  }
   try {
     const payload = verifyAccessToken(token);
     return payload.userId;
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Token expired') {
+      throw new AppError('Token expired', 401, 'TOKEN_EXPIRED');
+    }
+    throw new AppError('Invalid token', 401, 'INVALID_TOKEN');
   }
 }
 
@@ -145,21 +152,21 @@ function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): Favouri
 
 /**
  * GET /api/favourites
- * Returns the list of properties the user has liked (favourites), in search/feed response shape.
- * Requires x-session-id. Optional Authorization for user-scoped favourites.
+ * Returns liked properties for the authenticated user.
+ * Requires x-session-id AND Authorization Bearer token. Session-only returns no data.
  * Query: page (default 1), limit (default 25, max 100).
  */
 export async function GET(request: NextRequest) {
   try {
-    const sessionId = getSessionId(request);
-    const userId = tryGetUserIdFromAuthHeader(request);
+    getSessionId(request);
+    const userId = requireUserIdFromAuthHeader(request);
     const { page: pageRaw, limit: limitRaw } = validateQuery(request, favouritesQuerySchema);
     const page = pageRaw ?? 1;
     const perPage = limitRaw ?? 25;
     const lang = getLanguageCode(request);
 
     const offset = (page - 1) * perPage;
-    const { propertyIds, total } = await getLikedPropertyIds(sessionId, userId, perPage, offset);
+    const { propertyIds, total } = await getLikedPropertyIds(userId, perPage, offset);
 
     if (propertyIds.length === 0) {
       return createPaginatedResponse([], page, perPage, total);
