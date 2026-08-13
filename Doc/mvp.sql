@@ -682,7 +682,7 @@ CREATE TABLE user_activity.USER_PREFERENCES (
     total_properties_viewed INT DEFAULT 0,
     unique_properties_viewed INT DEFAULT 0,
     last_analyzed_at TIMESTAMP,
-    is_ready_for_recommendations BOOLEAN DEFAULT FALSE, -- TRUE when >= 5 views
+    is_ready_for_recommendations BOOLEAN DEFAULT FALSE, -- TRUE when all is_featured properties viewed
     
     created_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC'),
     updated_at TIMESTAMP DEFAULT (NOW() AT TIME ZONE 'UTC'),
