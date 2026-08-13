@@ -1,14 +1,15 @@
 -- =============================================================================
--- READY FOR RECOMMENDATIONS: all featured properties must be viewed
+-- Preferences at 5/10/15… + ready only after all featured viewed
 -- =============================================================================
 -- Run this entire file in Supabase / Postgres SQL Editor.
 --
--- Rule:
---   is_ready_for_recommendations = TRUE only when every property with
---   property.PROPERTIES.is_featured = TRUE has at least one non-disliked
---   PROPERTY_VIEWS row for that session.
+-- Rules:
+--   1) Preference counters / typesense_feed_sort_by update at valid view
+--      milestones: 5, 10, 15, 20, 25, … (and once when last featured is viewed).
+--   2) is_ready_for_recommendations = TRUE only when every property with
+--      property.PROPERTIES.is_featured = TRUE has a non-disliked view.
 --
--- Until then:
+-- Until ready:
 --   feed keeps Typesense sort is_featured:desc, featured_rank:asc, updated_at:desc
 --
 -- If a new property becomes featured, ready sessions are cleared until they
@@ -54,12 +55,15 @@ COMMENT ON FUNCTION user_activity.session_viewed_all_featured(VARCHAR) IS
   'TRUE when session has a non-disliked view for every PROPERTIES.is_featured=TRUE listing';
 
 -- -----------------------------------------------------------------------------
--- analyze_user_preferences: gate on all-featured-viewed (replaces count >= 5)
+-- analyze_user_preferences:
+--   - Updates preference data when called (milestones / last-featured)
+--   - Sets is_ready_for_recommendations TRUE only if all featured viewed
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION analyze_user_preferences(p_session_id VARCHAR(100))
 RETURNS VOID AS $$
 DECLARE
     v_view_count INT;
+    v_is_ready BOOLEAN;
     v_bedrooms_avg DECIMAL;
     v_bedrooms_min INT;
     v_bedrooms_max INT;
@@ -86,20 +90,22 @@ DECLARE
     v_part TEXT;
     v_clauses TEXT[] := ARRAY[]::TEXT[];
 BEGIN
-    -- Gate: must have viewed every featured property (is_featured = TRUE)
-    IF NOT user_activity.session_viewed_all_featured(p_session_id) THEN
-        UPDATE user_activity.USER_PREFERENCES
-        SET is_ready_for_recommendations = FALSE,
-            typesense_feed_sort_by = NULL,
-            updated_at = NOW() AT TIME ZONE 'UTC'
-        WHERE session_id = p_session_id;
-        RETURN;
-    END IF;
-
     SELECT COUNT(*) INTO v_view_count
     FROM property.PROPERTY_VIEWS
     WHERE session_id = p_session_id
       AND COALESCE(is_disliked, FALSE) = FALSE;
+
+    -- Ready flag depends only on viewing every is_featured=TRUE property
+    v_is_ready := user_activity.session_viewed_all_featured(p_session_id);
+
+    -- Too few views and not ready yet: keep preferences untouched, force not ready
+    IF v_view_count < 5 AND NOT v_is_ready THEN
+        UPDATE user_activity.USER_PREFERENCES
+        SET is_ready_for_recommendations = FALSE,
+            updated_at = NOW() AT TIME ZONE 'UTC'
+        WHERE session_id = p_session_id;
+        RETURN;
+    END IF;
 
     SELECT user_id
     INTO v_user_id
@@ -368,7 +374,7 @@ BEGIN
         v_rent_score,
         v_view_count,
         COUNT(DISTINCT pv.property_id),
-        TRUE,
+        v_is_ready,
         NOW() AT TIME ZONE 'UTC',
         NOW() AT TIME ZONE 'UTC'
     FROM property.PROPERTY_VIEWS pv
@@ -396,20 +402,42 @@ BEGIN
         rent_preference_score = EXCLUDED.rent_preference_score,
         total_properties_viewed = EXCLUDED.total_properties_viewed,
         unique_properties_viewed = EXCLUDED.unique_properties_viewed,
-        is_ready_for_recommendations = TRUE,
+        is_ready_for_recommendations = EXCLUDED.is_ready_for_recommendations,
         last_analyzed_at = NOW() AT TIME ZONE 'UTC',
         updated_at = NOW() AT TIME ZONE 'UTC';
 END;
 $$ LANGUAGE plpgsql;
 
 -- -----------------------------------------------------------------------------
--- Trigger on PROPERTY_VIEWS: re-check after every insert (not every 5 views)
+-- Trigger: preferenes at 5/10/15… ; also once when last featured is viewed
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION trigger_analyze_preferences_on_property_view()
 RETURNS TRIGGER AS $$
+DECLARE
+    v_valid_count INT;
+    v_all_featured BOOLEAN;
+    v_already_ready BOOLEAN;
 BEGIN
-    -- Always re-evaluate: not ready until all featured viewed; then full analyze
-    PERFORM analyze_user_preferences(NEW.session_id);
+    SELECT COUNT(*)::INT INTO v_valid_count
+    FROM property.PROPERTY_VIEWS
+    WHERE session_id = NEW.session_id
+      AND COALESCE(is_disliked, FALSE) = FALSE;
+
+    v_all_featured := user_activity.session_viewed_all_featured(NEW.session_id);
+
+    SELECT COALESCE(is_ready_for_recommendations, FALSE)
+    INTO v_already_ready
+    FROM user_activity.USER_PREFERENCES
+    WHERE session_id = NEW.session_id;
+
+    -- Milestone preference refresh: 5, 10, 15, 20, 25, ...
+    IF v_valid_count >= 5 AND v_valid_count % 5 = 0 THEN
+        PERFORM analyze_user_preferences(NEW.session_id);
+    -- Flip ready as soon as every featured property has been viewed
+    ELSIF v_all_featured AND NOT COALESCE(v_already_ready, FALSE) THEN
+        PERFORM analyze_user_preferences(NEW.session_id);
+    END IF;
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -448,22 +476,10 @@ CREATE TRIGGER trg_clear_ready_on_new_featured
     EXECUTE FUNCTION trigger_clear_ready_on_new_featured();
 
 -- =============================================================================
--- OPTIONAL: re-analyze one session after deploy (replace session id)
+-- OPTIONAL checks after deploy
 -- SELECT analyze_user_preferences('YOUR_SESSION_ID');
---
--- OPTIONAL: inspect featured progress for a session
--- SELECT
---   p.property_id,
---   p.featured_rank,
---   EXISTS (
---     SELECT 1 FROM property.PROPERTY_VIEWS pv
---     WHERE pv.property_id = p.property_id
---       AND pv.session_id = 'YOUR_SESSION_ID'
---       AND COALESCE(pv.is_disliked, FALSE) = FALSE
---   ) AS viewed
--- FROM property.PROPERTIES p
--- WHERE p.is_featured = TRUE
--- ORDER BY p.featured_rank ASC NULLS LAST;
---
 -- SELECT user_activity.session_viewed_all_featured('YOUR_SESSION_ID');
+--
+-- Preference milestones still: 5, 10, 15, 20, 25, ...
+-- Ready flag: TRUE only when all is_featured=TRUE properties are viewed.
 -- =============================================================================

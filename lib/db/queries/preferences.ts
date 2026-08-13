@@ -180,7 +180,7 @@ type PreferencesForFeedRow = {
   preference_counters: PreferenceCounters | null;
   /** Pre-computed Typesense _eval sort string; used by feed when present */
   typesense_feed_sort_by: string | null;
-  /** TRUE after session viewed every PROPERTIES.is_featured=TRUE listing (non-disliked). */
+  /** TRUE only after session viewed every PROPERTIES.is_featured=TRUE listing. Prefs refresh at 5/10/15… */
   is_ready_for_recommendations: boolean;
   /** Set when analyze_user_preferences last completed; feed clients use as preferencesGeneration */
   last_analyzed_at: string | null;
