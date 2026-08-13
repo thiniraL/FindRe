@@ -53,6 +53,7 @@ npm run dev
   - `FROM_EMAIL` - Sender address
 - `FRONTEND_URL` - Base URL for link-based emails (e.g. `https://yourdomain.com`)
 - `GOOGLE_CLIENT_ID` - Google OAuth client ID used by `POST /api/auth/google` (use comma-separated IDs for multi-platform clients)
+- `APPLE_CLIENT_ID` - Apple client ID(s) used by `POST /api/auth/apple` (iOS bundle ID and/or Services ID; comma-separated for multiple audiences)
 
 If SMTP env vars are missing or wrong, the API still returns success but emails are not sent; check server logs for `Email send failed` and the error details.
 
@@ -66,6 +67,11 @@ If SMTP env vars are missing or wrong, the API still returns success but emails 
 - `POST /api/auth/login` - Login
   - Body: `{ email, password, deviceId?, sessionId? }`
   - Links anonymous session to authenticated user if `sessionId` provided
+- `POST /api/auth/google` - Sign in with Google
+  - Body: `{ idToken, deviceId?, sessionId? }`
+- `POST /api/auth/apple` - Sign in with Apple
+  - Body: `{ identityToken, email?, deviceId?, sessionId? }`
+  - Send `email` on first authorization (Apple only returns it once to the client)
 - `POST /api/auth/refresh` - Refresh access token
 - `POST /api/auth/logout` - Logout
 - `POST /api/auth/verify-email` - Verify email

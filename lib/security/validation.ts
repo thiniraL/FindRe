@@ -26,6 +26,14 @@ export const googleLoginSchema = z.object({
   sessionId: z.string().optional(), // For linking anonymous session
 });
 
+export const appleLoginSchema = z.object({
+  identityToken: z.string().min(1, 'Apple identity token is required'),
+  /** Apple only returns email on first authorization; send it when the client receives it. */
+  email: z.string().email('Invalid email address').optional(),
+  deviceId: z.string().optional(),
+  sessionId: z.string().optional(), // For linking anonymous session
+});
+
 export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token is required'),
 });
