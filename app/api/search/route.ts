@@ -19,15 +19,16 @@ import {
 } from '@/lib/search/naturalLanguageQuery';
 import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
 import { verifyAccessToken } from '@/lib/auth/jwt';
-import { typesenseSearch, typesenseMultiSearchUnion } from '@/lib/search/typesense';
+import { typesenseSearch, typesenseNlSearch, typesenseMultiSearchUnion } from '@/lib/search/typesense';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Search pipeline:
  *   When q is non-empty and TYPESENSE_NL_MODEL_ID is set (and caller did not pass
- *   nl_query=false), send q to Typesense with nl_query=true + nl_model_id.
- *   Explicit filter params still become filter_by. Empty q → normal Typesense search.
+ *   nl_query=false), parse q with Typesense NL then search again using the generated
+ *   q / filter_by / sort_by (empty LLM q becomes *). Explicit filter params still
+ *   become filter_by. Empty q → normal Typesense search.
  */
 
 const DEFAULT_COUNTRY_ID = 1;
@@ -248,27 +249,27 @@ async function runSearch(
     return mapHitsToItems(resp, lang, request);
   }
 
-  // NL mode: map currency symbols → ISO codes, then send to Typesense (nl_query + nl_model_id).
-  const q = useNl
-    ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '')
-    : buildSearchQuery(filterState);
-
-  const sortBy = useNl
-    ? undefined
-    : filterState.sortBy?.trim() || 'updated_at:desc';
+  if (useNl) {
+    const resp = await typesenseNlSearch<TypesensePropertyDoc>({
+      collection: 'properties',
+      q: getTypesenseNlQuery(nlOptions!.rawQ?.trim() || ''),
+      queryBy,
+      filterBy: filterBy ?? undefined,
+      page,
+      perPage,
+      nlModelId: nlOptions!.nlModelId!,
+    });
+    return mapHitsToItems(resp, lang, request);
+  }
 
   const resp = await typesenseSearch<TypesensePropertyDoc>({
     collection: 'properties',
-    q,
+    q: buildSearchQuery(filterState),
     queryBy,
     filterBy: filterBy ?? undefined,
-    sortBy,
+    sortBy: filterState.sortBy?.trim() || 'updated_at:desc',
     page,
     perPage,
-    ...(useNl && {
-      nlQuery: true,
-      nlModelId: nlOptions!.nlModelId,
-    }),
   });
 
   return mapHitsToItems(resp, lang, request);

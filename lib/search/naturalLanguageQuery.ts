@@ -1,6 +1,6 @@
 /**
  * Typesense Natural Language Search helpers.
- * Free-text `q` is sent to Typesense with nl_query + nl_model_id; no local rule parser.
+ * Free-text `q` is parsed by Typesense NL, then searched again with generated q / filters.
  *
  * Frontend NL queries often include currency symbols ($, €, £, د.إ). Those are mapped
  * to ISO codes before Typesense so NL / query_by can match `currency_code`.

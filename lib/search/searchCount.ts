@@ -10,7 +10,7 @@ import {
   needsKeywordOrSearch,
 } from './buildFilterQuery';
 import { getSearchQueryBy } from './typesenseSchema';
-import { typesenseSearch, typesenseMultiSearchUnion } from './typesense';
+import { typesenseSearch, typesenseNlSearch, typesenseMultiSearchUnion } from './typesense';
 import { getTypesenseNlQuery } from './naturalLanguageQuery';
 
 const PURPOSE_KEY_TO_LABEL: Record<string, string> = {
@@ -59,21 +59,27 @@ export async function runSearchCount(
     return resp.found;
   }
 
-  const q = useNl ? getTypesenseNlQuery(nlOptions!.rawQ?.trim() || '') : buildSearchQuery(state);
-  const sortBy = useNl ? undefined : state.sortBy?.trim() || 'updated_at:desc';
+  if (useNl) {
+    const resp = await typesenseNlSearch<{ property_id: string }>({
+      collection: 'properties',
+      q: getTypesenseNlQuery(nlOptions!.rawQ?.trim() || ''),
+      queryBy,
+      filterBy: filterBy ?? undefined,
+      page: 1,
+      perPage: 0,
+      nlModelId: nlOptions!.nlModelId!,
+    });
+    return resp.found;
+  }
 
   const resp = await typesenseSearch<{ property_id: string }>({
     collection: 'properties',
-    q,
+    q: buildSearchQuery(state),
     queryBy,
     filterBy: filterBy ?? undefined,
-    sortBy,
+    sortBy: state.sortBy?.trim() || 'updated_at:desc',
     page: 1,
     perPage: 0,
-    ...(useNl && {
-      nlQuery: true,
-      nlModelId: nlOptions!.nlModelId,
-    }),
   });
 
   return resp.found;

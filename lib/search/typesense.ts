@@ -109,6 +109,67 @@ export async function typesenseSearch<TDoc>(options: {
   );
 }
 
+type NlSearchParams = {
+  q?: string;
+  filter_by?: string;
+  sort_by?: string;
+};
+
+function nlParamString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * Typesense NL still keyword-searches the original sentence even when the LLM
+ * returns q:"". Parse with nl_query, then search again using generated q / filters.
+ */
+export async function typesenseNlSearch<TDoc>(options: {
+  collection: string;
+  q: string;
+  queryBy: string;
+  filterBy?: string;
+  sortBy?: string;
+  page: number;
+  perPage: number;
+  nlModelId: string;
+}): Promise<TypesenseSearchResponse<TDoc>> {
+  const parsed = await typesenseSearch<TDoc>({
+    ...options,
+    page: 1,
+    perPage: 0,
+    nlQuery: true,
+    nlModelId: options.nlModelId,
+  });
+
+  const generated = (parsed.parsed_nl_query?.generated_params ?? {}) as NlSearchParams;
+  const augmented = (parsed.parsed_nl_query?.augmented_params ?? {}) as NlSearchParams;
+
+  const q = nlParamString(generated.q) || '*';
+  const filterBy =
+    nlParamString(augmented.filter_by) ||
+    nlParamString(generated.filter_by) ||
+    options.filterBy;
+  const sortBy = nlParamString(generated.sort_by) || options.sortBy;
+
+  const results = await typesenseSearch<TDoc>({
+    collection: options.collection,
+    q,
+    queryBy: options.queryBy,
+    filterBy: filterBy || undefined,
+    sortBy: sortBy || undefined,
+    page: options.page,
+    perPage: options.perPage,
+  });
+
+  if (parsed.parsed_nl_query) {
+    results.parsed_nl_query = parsed.parsed_nl_query;
+  }
+  results.search_time_ms =
+    (parsed.search_time_ms || 0) + (results.search_time_ms || 0);
+
+  return results;
+}
+
 type TypesenseSearchParams = {
   collection: string;
   q: string;
