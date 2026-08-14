@@ -45,8 +45,10 @@ type TypesensePropertyDoc = {
   community_en?: string;
   primary_image_url?: string;
   primary_media_type?: string;
+  primary_thumbnail_url?: string;
   additional_image_urls?: string[];
   additional_media_types?: string[];
+  additional_thumbnail_urls?: string[];
 };
 
 function getSessionId(request: NextRequest): string {
@@ -101,8 +103,8 @@ type FavouriteItem = {
     isFeatured: boolean;
     featuredRank: number | null;
     additionalImageUrls: string[];
-    primaryMedia: { url: string; mediaType: 'image' | 'video' } | null;
-    additionalMedia: Array<{ url: string; mediaType: 'image' | 'video' }>;
+    primaryMedia: { url: string; mediaType: 'image' | 'video'; thumbnailUrl?: string } | null;
+    additionalMedia: Array<{ url: string; mediaType: 'image' | 'video'; thumbnailUrl?: string }>;
     purposeKey: string | null;
     isLiked: true;
   };
@@ -111,9 +113,17 @@ type FavouriteItem = {
 function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): FavouriteItem {
   const locationParts = [d.address, d.community_en, d.area_en, d.city_en].filter(Boolean);
   const location = locationParts.length ? locationParts.join(', ') : null;
-  const primaryMedia = toMediaItem(d.primary_image_url, d.primary_media_type);
+  const primaryMedia = toMediaItem(
+    d.primary_image_url,
+    d.primary_media_type,
+    d.primary_thumbnail_url
+  );
   const additionalMedia = withTempTestVideo(
-    zipMediaUrls(d.additional_image_urls, d.additional_media_types)
+    zipMediaUrls(
+      d.additional_image_urls,
+      d.additional_media_types,
+      d.additional_thumbnail_urls
+    )
   );
   return {
     property: {

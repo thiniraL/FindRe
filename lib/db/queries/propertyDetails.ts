@@ -44,7 +44,7 @@ export type PropertyDetailRow = {
    * Featured set is up to 5 mixed image/video items.
    */
   images_json: PropertyImageJson[] | null;
-  /** Videos from property.property_videos (url, displayOrder, durationSeconds, isFeatured). */
+  /** Videos from property.property_videos (url, thumbnailUrl, displayOrder, durationSeconds, isFeatured). */
   videos_json: PropertyVideoJson[] | null;
 };
 
@@ -56,6 +56,8 @@ export type PropertyImageJson = {
 
 export type PropertyVideoJson = {
   url: string;
+  /** First-frame poster from property.property_videos.thumbnail_url. */
+  thumbnailUrl?: string | null;
   displayOrder: number | null;
   durationSeconds: number | null;
   /** Present when property.property_videos.is_featured exists. */
@@ -135,6 +137,7 @@ export async function getPropertyById(
           json_agg(
             json_build_object(
               'url', pv.video_url,
+              'thumbnailUrl', pv.thumbnail_url,
               'displayOrder', pv.display_order,
               'durationSeconds', pv.duration_seconds,
               'isFeatured', COALESCE(pv.is_featured, FALSE)

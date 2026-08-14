@@ -29,7 +29,6 @@ type ConfigRow = {
 };
 
 type OptionItem = { value: string | number; label: string };
-type OptionItemWithMain = OptionItem & { mainPropertyTypeIds?: number[] };
 type RangeResult = { min: number; max: number } | null;
 
 function humanizeCompletionStatus(v: string): string {
@@ -98,32 +97,15 @@ async function getCompletionOptions(
   return [all, ...rest];
 }
 
-async function getMainPropertyTypes(client: any, lang: string): Promise<OptionItem[]> {
-  const res = await client.queryObject<{ main_type_id: number; label: string }>(
-    `SELECT main_type_id, COALESCE(name_translations->>$1, name_translations->>'en') AS label
-     FROM property.MAIN_PROPERTY_TYPES ORDER BY main_type_key`,
-    [lang]
-  );
-  return res.rows.map((r) => ({ value: r.main_type_id, label: r.label || String(r.main_type_id) }));
-}
-
-async function getPropertyTypes(
-  client: any,
-  lang: string
-): Promise<OptionItemWithMain[]> {
-  const res = await client.queryObject<{
-    type_id: number;
-    label: string;
-    main_property_type_ids: number[] | null;
-  }>(
-    `SELECT type_id, COALESCE(name_translations->>$1, name_translations->>'en') AS label, main_property_type_ids
-     FROM property.PROPERTY_TYPES ORDER BY type_key`,
+async function getPropertyTypes(client: any, lang: string): Promise<OptionItem[]> {
+  const res = await client.queryObject<{ type_id: number; label: string }>(
+    `SELECT type_id, COALESCE(name_translations->>$1, name_translations->>'en') AS label
+     FROM property.PROPERTY_TYPES ORDER BY label NULLS LAST, type_id`,
     [lang]
   );
   return res.rows.map((r) => ({
     value: r.type_id,
     label: r.label || String(r.type_id),
-    mainPropertyTypeIds: r.main_property_type_ids ?? undefined,
   }));
 }
 
@@ -218,7 +200,6 @@ async function fetchOptionsForScope(
   const [
     countResult,
     completionOptions,
-    mainPropertyTypeOptions,
     propertyTypeOptions,
     priceRange,
     areaRange,
@@ -227,7 +208,6 @@ async function fetchOptionsForScope(
   ] = await Promise.all([
     getPropertyCount(client, purposeKey, countryId, lang),
     getCompletionOptions(client, purposeKey, countryId),
-    getMainPropertyTypes(client, lang),
     getPropertyTypes(client, lang),
     getPriceRange(client, purposeKey, countryId, currencyId),
     getAreaRange(client, purposeKey, countryId),
@@ -238,7 +218,6 @@ async function fetchOptionsForScope(
   return {
     countResult,
     completionOptions,
-    mainPropertyTypeOptions,
     propertyTypeOptions,
     priceRange,
     areaRange,
@@ -250,27 +229,12 @@ async function fetchOptionsForScope(
 type MergedOpts = {
   countResult: { count: number; purpose_label: string };
   completionOptions: OptionItem[];
-  mainPropertyTypeOptions: OptionItem[];
-  propertyTypeOptions: OptionItemWithMain[];
+  propertyTypeOptions: OptionItem[];
   priceRange: RangeResult;
   areaRange: RangeResult;
   featureOptions: OptionItem[];
   keywordOptions: OptionItem[];
 };
-
-/** Build nested options: main types first, then under each main type the property types whose main_property_type_ids contains that main id (inner options only label + value). */
-function buildNestedPropertyTypeOptions(
-  mainPropertyTypeOptions: OptionItem[],
-  propertyTypeOptions: OptionItemWithMain[]
-): { label: string; value: number; options: { label: string; value: number }[] }[] {
-  return mainPropertyTypeOptions.map((main) => ({
-    label: main.label,
-    value: main.value as number,
-    options: propertyTypeOptions
-      .filter((pt) => (pt.mainPropertyTypeIds ?? []).includes(main.value as number))
-      .map((pt) => ({ label: pt.label, value: pt.value as number })),
-  }));
-}
 
 function mergeOptionsIntoConfig(
   config: Record<string, unknown>,
@@ -280,7 +244,7 @@ function mergeOptionsIntoConfig(
   const cfg = JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
   const filtersIn = (cfg.filters as Record<string, unknown>[] | undefined) ?? [];
   const meta = cfg.meta as Record<string, unknown> | undefined;
-  const { countResult, completionOptions, mainPropertyTypeOptions, propertyTypeOptions, priceRange, areaRange, featureOptions, keywordOptions } = opts;
+  const { countResult, completionOptions, propertyTypeOptions, priceRange, areaRange, featureOptions, keywordOptions } = opts;
   const totalCount = countResult.count;
   const purposeLabel = countResult.purpose_label || purposeKey;
   if (meta && typeof meta === 'object') {
@@ -290,7 +254,6 @@ function mergeOptionsIntoConfig(
         ? `${purposeLabel} – 0 properties`
         : `${purposeLabel} – ${totalCount.toLocaleString()} ${totalCount === 1 ? 'property' : 'properties'}`;
   }
-  const nestedPropertyTypeOptions = buildNestedPropertyTypeOptions(mainPropertyTypeOptions, propertyTypeOptions);
   const filters: Record<string, unknown>[] = [];
   for (const filter of filtersIn) {
     const id = filter.id as string | undefined;
@@ -301,8 +264,8 @@ function mergeOptionsIntoConfig(
         filter.options = completionOptions;
         break;
       case 'propertyTypeIds':
-        (filter as Record<string, unknown>).type = 'checkbox-group-property';
-        filter.options = nestedPropertyTypeOptions;
+        (filter as Record<string, unknown>).type = 'checkbox-group';
+        filter.options = propertyTypeOptions;
         delete (filter as Record<string, unknown>).dependsOn;
         break;
       case 'bedrooms':

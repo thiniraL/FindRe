@@ -1,10 +1,13 @@
 /**
- * Zip Typesense URL + media-type parallel arrays into API media items.
+ * Zip Typesense URL + media-type + thumbnail parallel arrays into API media items.
  * Older docs without media-type fields default to "image".
+ * Thumbnail is only attached when mediaType is video.
  */
 export type PropertyMediaItem = {
   url: string;
   mediaType: 'image' | 'video';
+  /** First-frame poster; only present for videos. */
+  thumbnailUrl?: string;
 };
 
 export function normalizeMediaType(
@@ -13,29 +16,43 @@ export function normalizeMediaType(
   return mediaType === 'video' ? 'video' : 'image';
 }
 
+function optionalThumbnailUrl(
+  thumbnailUrl: string | null | undefined
+): string | undefined {
+  if (typeof thumbnailUrl !== 'string') return undefined;
+  const trimmed = thumbnailUrl.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export function toMediaItem(
   url: string | null | undefined,
-  mediaType: string | null | undefined
+  mediaType: string | null | undefined,
+  thumbnailUrl?: string | null
 ): PropertyMediaItem | null {
   if (typeof url !== 'string' || !url) return null;
+  const type = normalizeMediaType(mediaType);
+  const thumb = type === 'video' ? optionalThumbnailUrl(thumbnailUrl) : undefined;
   return {
     url,
-    mediaType: normalizeMediaType(mediaType),
+    mediaType: type,
+    ...(thumb ? { thumbnailUrl: thumb } : {}),
   };
 }
 
 export function zipMediaUrls(
   urls: string[] | null | undefined,
-  mediaTypes: string[] | null | undefined
+  mediaTypes: string[] | null | undefined,
+  thumbnailUrls?: string[] | null
 ): PropertyMediaItem[] {
   const list = Array.isArray(urls) ? urls : [];
   const types = Array.isArray(mediaTypes) ? mediaTypes : [];
+  const thumbs = Array.isArray(thumbnailUrls) ? thumbnailUrls : [];
   return list
     .filter((url): url is string => typeof url === 'string' && url.length > 0)
-    .map((url, index) => ({
-      url,
-      mediaType: normalizeMediaType(types[index]),
-    }));
+    .map((url, index) =>
+      toMediaItem(url, types[index], thumbs[index])
+    )
+    .filter((item): item is PropertyMediaItem => item != null);
 }
 
 /** Legacy string URL helpers (keep old API fields unchanged). */

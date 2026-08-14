@@ -38,6 +38,7 @@ export async function GET(request: NextRequest) {
       bathrooms?: number;
       primary_image_url?: string;
       primary_media_type?: string;
+      primary_thumbnail_url?: string;
       agent_id?: number;
       agent_name?: string;
       agent_profile_image_url?: string;
@@ -60,7 +61,11 @@ export async function GET(request: NextRequest) {
 
     const items = resp.hits.map((h) => {
       const d = h.document;
-      const primaryMedia = toMediaItem(d.primary_image_url, d.primary_media_type);
+      const primaryMedia = toMediaItem(
+        d.primary_image_url,
+        d.primary_media_type,
+        d.primary_thumbnail_url
+      );
       return {
         rank: d.featured_rank ?? null,
         property: {

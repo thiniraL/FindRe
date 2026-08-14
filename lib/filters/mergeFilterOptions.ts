@@ -3,7 +3,6 @@ import type { FilterScope } from '@/lib/db/queries/filterOptions';
 import {
   getPropertyCountByPurpose,
   getCompletionStatusOptions,
-  getMainPropertyTypesForFilter,
   getPropertyTypesForFilter,
   getPriceRange,
   getAreaRange,
@@ -36,7 +35,6 @@ export async function mergeFilterOptions(
   const [
     countResult,
     completionOptions,
-    mainPropertyTypeOptions,
     propertyTypeOptions,
     priceRange,
     areaRange,
@@ -45,7 +43,6 @@ export async function mergeFilterOptions(
   ] = await Promise.all([
     getPropertyCountByPurpose(scope),
     getCompletionStatusOptions(scope),
-    getMainPropertyTypesForFilter(lang),
     getPropertyTypesForFilter(lang),
     getPriceRange(scope),
     getAreaRange(scope),
@@ -67,16 +64,16 @@ export async function mergeFilterOptions(
   for (const filter of filters) {
     const id = filter.id as string | undefined;
     if (!id) continue;
+    if (id === 'mainPropertyTypeIds') continue;
 
     switch (id) {
       case 'completionStatus':
         filter.options = completionOptions;
         break;
-      case 'mainPropertyTypeIds':
-        filter.options = mainPropertyTypeOptions;
-        break;
       case 'propertyTypeIds':
-        filter.options = propertyTypeOptions;
+        filter.type = 'checkbox-group';
+        filter.options = propertyTypeOptions.map(({ value, label }) => ({ value, label }));
+        delete filter.dependsOn;
         break;
       case 'bedrooms':
       case 'bathrooms':

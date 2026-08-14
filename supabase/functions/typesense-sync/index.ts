@@ -20,6 +20,7 @@ type TypesenseField = {
   facet?: boolean;
   optional?: boolean;
   sort?: boolean;
+  index?: boolean;
 };
 
 type TypesenseCollectionSchema = {
@@ -88,11 +89,14 @@ const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     { name: 'primary_image_url', type: 'string', optional: true },
     // "image" | "video" — primary can be either (first featured / first media by display_order)
     { name: 'primary_media_type', type: 'string', optional: true },
+    { name: 'primary_thumbnail_url', type: 'string', optional: true, index: false },
     { name: 'additional_image_urls', type: 'string[]', optional: true },
     // Parallel to additional_image_urls / all_image_urls: "image" | "video"
     { name: 'additional_media_types', type: 'string[]', optional: true },
+    { name: 'additional_thumbnail_urls', type: 'string[]', optional: true, index: false },
     { name: 'all_image_urls', type: 'string[]', optional: true },
     { name: 'all_media_types', type: 'string[]', optional: true },
+    { name: 'all_thumbnail_urls', type: 'string[]', optional: true, index: false },
     { name: 'image_is_featured', type: 'int32[]', optional: true },
     { name: 'geo', type: 'geopoint', optional: true },
   ],
@@ -333,16 +337,21 @@ type PropertyDoc = {
   community_en: string | null;
   primary_image_url: string | null;
   primary_media_type: string | null;
+  primary_thumbnail_url: string | null;
   additional_image_urls: string[] | null;
   additional_media_types: string[] | null;
+  additional_thumbnail_urls: string[] | null;
   all_image_urls: string[] | null;
   all_media_types: string[] | null;
+  all_thumbnail_urls: string[] | null;
   image_is_featured: number[] | null;
 };
 
 type MediaJsonRow = {
   url?: string | null;
   mediaType?: string | null;
+  thumbnailUrl?: string | null;
+  compressedUrl?: string | null;
   isFeatured?: boolean | null;
   displayOrder?: number | null;
 };
@@ -364,32 +373,73 @@ function parseMediaJson(raw: MediaJsonRow[] | string | null | undefined): MediaJ
  * Build Typesense media fields from mixed image/video rows (shared display_order).
  * Featured carousel = up to 5 featured items (or first 5 if none marked featured).
  * Primary is the first carousel item (image or video).
+ * Thumbnail arrays are parallel to URL arrays; video first-frame URL or a space
+ * placeholder (Typesense rejects empty strings).
  */
+function videoThumbnailUrl(
+  mediaType: 'image' | 'video',
+  thumbnailUrl: string | null | undefined
+): string {
+  if (mediaType !== 'video' || typeof thumbnailUrl !== 'string') return '';
+  return thumbnailUrl.trim();
+}
+
+/** Typesense string[] cannot store ""; space is treated as missing on read. */
+function typesenseThumbSlot(url: string): string {
+  return url.trim() || ' ';
+}
+
+/** Image URL for Typesense primary_image_url / all_image_urls / additional_image_urls. */
+function imageDisplayUrl(
+  compressedUrl: string | null | undefined,
+  originalUrl: string | null | undefined
+): string {
+  const compressed =
+    typeof compressedUrl === 'string' ? compressedUrl.trim() : '';
+  if (compressed) return compressed;
+  return typeof originalUrl === 'string' ? originalUrl.trim() : '';
+}
+
 function buildMediaDocFields(raw: MediaJsonRow[] | string | null | undefined): {
   primary_image_url: string | null;
   primary_media_type: string | null;
+  primary_thumbnail_url: string | null;
   additional_image_urls: string[] | null;
   additional_media_types: string[] | null;
+  additional_thumbnail_urls: string[] | null;
   all_image_urls: string[] | null;
   all_media_types: string[] | null;
+  all_thumbnail_urls: string[] | null;
   image_is_featured: number[] | null;
 } {
   const media = parseMediaJson(raw)
-    .map((row) => ({
-      url: typeof row?.url === 'string' ? row.url.trim() : '',
-      mediaType: row?.mediaType === 'video' ? ('video' as const) : ('image' as const),
-      isFeatured: Boolean(row?.isFeatured),
-    }))
+    .map((row) => {
+      const mediaType = row?.mediaType === 'video' ? ('video' as const) : ('image' as const);
+      const originalUrl = typeof row?.url === 'string' ? row.url.trim() : '';
+      const url =
+        mediaType === 'image'
+          ? imageDisplayUrl(row?.compressedUrl, originalUrl)
+          : originalUrl;
+      return {
+        url,
+        mediaType,
+        thumbnailUrl: videoThumbnailUrl(mediaType, row?.thumbnailUrl),
+        isFeatured: Boolean(row?.isFeatured),
+      };
+    })
     .filter((row) => row.url.length > 0);
 
   if (!media.length) {
     return {
       primary_image_url: null,
       primary_media_type: null,
+      primary_thumbnail_url: null,
       additional_image_urls: null,
       additional_media_types: null,
+      additional_thumbnail_urls: null,
       all_image_urls: null,
       all_media_types: null,
+      all_thumbnail_urls: null,
       image_is_featured: null,
     };
   }
@@ -403,10 +453,16 @@ function buildMediaDocFields(raw: MediaJsonRow[] | string | null | undefined): {
   return {
     primary_image_url: primary?.url ?? null,
     primary_media_type: primary?.mediaType ?? null,
+    primary_thumbnail_url:
+      primary?.mediaType === 'video' && primary.thumbnailUrl
+        ? primary.thumbnailUrl
+        : null,
     additional_image_urls: additional.map((row) => row.url),
     additional_media_types: additional.map((row) => row.mediaType),
+    additional_thumbnail_urls: additional.map((row) => typesenseThumbSlot(row.thumbnailUrl)),
     all_image_urls: media.map((row) => row.url),
     all_media_types: media.map((row) => row.mediaType),
+    all_thumbnail_urls: media.map((row) => typesenseThumbSlot(row.thumbnailUrl)),
     image_is_featured: media.map((row) => (row.isFeatured ? 1 : 0)),
   };
 }
@@ -705,6 +761,8 @@ serve(async (req) => {
                 json_build_object(
                   'url', m.url,
                   'mediaType', m.media_type,
+                  'thumbnailUrl', m.thumbnail_url,
+                  'compressedUrl', m.compressed_url,
                   'isFeatured', m.is_featured,
                   'displayOrder', m.display_order
                 )
@@ -714,8 +772,10 @@ serve(async (req) => {
             ) AS media_json
             FROM (
               SELECT
-                COALESCE(pi.compressed_image_url, pi.image_url) AS url,
+                NULLIF(btrim(pi.image_url), '') AS url,
                 'image'::text AS media_type,
+                NULL::text AS thumbnail_url,
+                NULLIF(btrim(pi.compressed_image_url), '') AS compressed_url,
                 COALESCE(pi.is_featured, FALSE) AS is_featured,
                 pi.display_order,
                 0 AS tie,
@@ -726,6 +786,8 @@ serve(async (req) => {
               SELECT
                 pv.video_url AS url,
                 'video'::text AS media_type,
+                NULLIF(btrim(pv.thumbnail_url), '') AS thumbnail_url,
+                NULL::text AS compressed_url,
                 COALESCE(pv.is_featured, FALSE) AS is_featured,
                 pv.display_order,
                 1 AS tie,

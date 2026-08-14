@@ -76,8 +76,10 @@ type TypesensePropertyDoc = {
   community_en?: string;
   primary_image_url?: string;
   primary_media_type?: string;
+  primary_thumbnail_url?: string;
   additional_image_urls?: string[];
   additional_media_types?: string[];
+  additional_thumbnail_urls?: string[];
   all_image_urls?: string[];
   all_media_types?: string[];
   image_is_featured?: number[];
@@ -286,9 +288,17 @@ async function mapHitsToItems(
     const pid = Number(d.property_id);
     const locationParts = [d.address].filter(Boolean);
     const location = locationParts.length ? locationParts.join(', ') : null;
-    const primaryMedia = toMediaItem(d.primary_image_url, d.primary_media_type);
+    const primaryMedia = toMediaItem(
+      d.primary_image_url,
+      d.primary_media_type,
+      d.primary_thumbnail_url
+    );
     const additionalMedia = withTempTestVideo(
-      zipMediaUrls(d.additional_image_urls, d.additional_media_types)
+      zipMediaUrls(
+        d.additional_image_urls,
+        d.additional_media_types,
+        d.additional_thumbnail_urls
+      )
     );
     return {
       property: {

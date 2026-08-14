@@ -32,6 +32,7 @@ type PropertyMediaItem =
       displayOrder: number | null;
       isFeatured: boolean;
       durationSeconds?: number;
+      thumbnailUrl?: string;
     };
 
 function parseJsonArray<T>(value: T[] | string | null | undefined): T[] {
@@ -97,6 +98,9 @@ function buildOrderedMedia(
         ...(video.durationSeconds != null
           ? { durationSeconds: Number(video.durationSeconds) }
           : {}),
+        ...(typeof video.thumbnailUrl === 'string' && video.thumbnailUrl.trim()
+          ? { thumbnailUrl: video.thumbnailUrl.trim() }
+          : {}),
       },
     });
   });
@@ -134,7 +138,7 @@ export async function GET(
     const lang = getLanguageCode(request);
 
     // v4: mixed image/video gallery sorted by shared displayOrder
-    const cacheKey = `property:${propertyId}:${lang}:v4`;
+    const cacheKey = `property:${propertyId}:${lang}:v5`;
     let row = propertyDetailCache.get<Awaited<ReturnType<typeof getPropertyById>>>(cacheKey);
     if (!row) {
       row = await getPropertyById(propertyId, lang);
@@ -201,6 +205,9 @@ export async function GET(
           isFeatured: primary.isFeatured,
           ...(primary.mediaType === 'video' && primary.durationSeconds != null
             ? { durationSeconds: primary.durationSeconds }
+            : {}),
+          ...(primary.mediaType === 'video' && primary.thumbnailUrl
+            ? { thumbnailUrl: primary.thumbnailUrl }
             : {}),
         }
       : null;

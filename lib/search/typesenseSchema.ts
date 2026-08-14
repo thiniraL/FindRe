@@ -108,10 +108,14 @@ export const PROPERTIES_COLLECTION_SCHEMA: TypesenseCollectionSchema = {
     // Media (URLs may be image or video; parallel *_media_types is "image" | "video")
     { name: 'primary_image_url', type: 'string', optional: true },
     { name: 'primary_media_type', type: 'string', optional: true },
+    // First-frame poster when primary_media_type is video (empty for images)
+    { name: 'primary_thumbnail_url', type: 'string', optional: true, index: false },
     { name: 'additional_image_urls', type: 'string[]', optional: true },
     { name: 'additional_media_types', type: 'string[]', optional: true },
+    { name: 'additional_thumbnail_urls', type: 'string[]', optional: true, index: false },
     { name: 'all_image_urls', type: 'string[]', optional: true },
     { name: 'all_media_types', type: 'string[]', optional: true },
+    { name: 'all_thumbnail_urls', type: 'string[]', optional: true, index: false },
     { name: 'image_is_featured', type: 'int32[]', optional: true },
 
     // Optional geo
