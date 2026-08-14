@@ -89,12 +89,12 @@ async function getCompletionOptions(
      ORDER BY p.completion_status`,
     [purposeKey, countryId]
   );
-  const all: OptionItem = { value: 'all', label: 'All' };
   const rest = res.rows.map((r) => ({
     value: r.completion_status,
     label: humanizeCompletionStatus(r.completion_status),
   }));
-  return [all, ...rest];
+  if (rest.length === 0) return [];
+  return [{ value: 'all', label: 'All' }, ...rest];
 }
 
 async function getPropertyTypes(client: any, lang: string): Promise<OptionItem[]> {
@@ -254,6 +254,13 @@ function mergeOptionsIntoConfig(
         ? `${purposeLabel} – 0 properties`
         : `${purposeLabel} – ${totalCount.toLocaleString()} ${totalCount === 1 ? 'property' : 'properties'}`;
   }
+  const DEFAULT_COMPLETION_FILTER: Record<string, unknown> = {
+    id: 'completionStatus',
+    name: 'Completion Status',
+    type: 'checkbox-group',
+    order: 2,
+  };
+  let completionFilterTemplate: Record<string, unknown> | null = null;
   const filters: Record<string, unknown>[] = [];
   for (const filter of filtersIn) {
     const id = filter.id as string | undefined;
@@ -261,6 +268,8 @@ function mergeOptionsIntoConfig(
     if (id === 'mainPropertyTypeIds') continue;
     switch (id) {
       case 'completionStatus':
+        completionFilterTemplate = filter;
+        if (completionOptions.length === 0) continue;
         filter.options = completionOptions;
         break;
       case 'propertyTypeIds':
@@ -308,6 +317,21 @@ function mergeOptionsIntoConfig(
         break;
     }
     filters.push(filter);
+  }
+  if (
+    completionOptions.length > 0 &&
+    !filters.some((f) => f.id === 'completionStatus')
+  ) {
+    const tmpl = completionFilterTemplate
+      ? { ...completionFilterTemplate }
+      : { ...DEFAULT_COMPLETION_FILTER };
+    tmpl.options = completionOptions;
+    const order = typeof tmpl.order === 'number' ? tmpl.order : 2;
+    const insertAt = filters.findIndex(
+      (f) => typeof f.order === 'number' && (f.order as number) > order
+    );
+    if (insertAt === -1) filters.push(tmpl);
+    else filters.splice(insertAt, 0, tmpl);
   }
   cfg.filters = filters;
   return cfg as Record<string, unknown>;

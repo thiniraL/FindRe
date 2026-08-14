@@ -61,6 +61,9 @@ export async function mergeFilterOptions(
   }
 
   const filters = Array.isArray(config.filters) ? config.filters : [];
+  const mergedFilters: ConfigFilter[] = [];
+  let completionFilterTemplate: ConfigFilter | null = null;
+
   for (const filter of filters) {
     const id = filter.id as string | undefined;
     if (!id) continue;
@@ -68,6 +71,8 @@ export async function mergeFilterOptions(
 
     switch (id) {
       case 'completionStatus':
+        completionFilterTemplate = filter;
+        if (completionOptions.length === 0) continue;
         filter.options = completionOptions;
         break;
       case 'propertyTypeIds':
@@ -108,7 +113,31 @@ export async function mergeFilterOptions(
       default:
         break;
     }
+    mergedFilters.push(filter);
   }
+
+  if (
+    completionOptions.length > 0 &&
+    !mergedFilters.some((f) => f.id === 'completionStatus')
+  ) {
+    const tmpl: ConfigFilter = completionFilterTemplate
+      ? { ...completionFilterTemplate }
+      : {
+          id: 'completionStatus',
+          name: 'Completion Status',
+          type: 'checkbox-group',
+          order: 2,
+        };
+    tmpl.options = completionOptions;
+    const order = typeof tmpl.order === 'number' ? tmpl.order : 2;
+    const insertAt = mergedFilters.findIndex(
+      (f) => typeof f.order === 'number' && f.order > order
+    );
+    if (insertAt === -1) mergedFilters.push(tmpl);
+    else mergedFilters.splice(insertAt, 0, tmpl);
+  }
+
+  config.filters = mergedFilters;
 
   return config as Record<string, unknown>;
 }

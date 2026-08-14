@@ -85,6 +85,7 @@ export async function getCompletionStatusOptions(
     value: r.completion_status,
     label: humanizeCompletionStatus(r.completion_status),
   }));
+  if (dbOptions.length === 0) return [];
   return [COMPLETION_STATUS_ALL_OPTION, ...dbOptions];
 }
 
