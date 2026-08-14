@@ -389,17 +389,6 @@ function typesenseThumbSlot(url: string): string {
   return url.trim() || ' ';
 }
 
-/** Image URL for Typesense primary_image_url / all_image_urls / additional_image_urls. */
-function imageDisplayUrl(
-  compressedUrl: string | null | undefined,
-  originalUrl: string | null | undefined
-): string {
-  const compressed =
-    typeof compressedUrl === 'string' ? compressedUrl.trim() : '';
-  if (compressed) return compressed;
-  return typeof originalUrl === 'string' ? originalUrl.trim() : '';
-}
-
 function buildMediaDocFields(raw: MediaJsonRow[] | string | null | undefined): {
   primary_image_url: string | null;
   primary_media_type: string | null;
@@ -415,11 +404,7 @@ function buildMediaDocFields(raw: MediaJsonRow[] | string | null | undefined): {
   const media = parseMediaJson(raw)
     .map((row) => {
       const mediaType = row?.mediaType === 'video' ? ('video' as const) : ('image' as const);
-      const originalUrl = typeof row?.url === 'string' ? row.url.trim() : '';
-      const url =
-        mediaType === 'image'
-          ? imageDisplayUrl(row?.compressedUrl, originalUrl)
-          : originalUrl;
+      const url = typeof row?.url === 'string' ? row.url.trim() : '';
       return {
         url,
         mediaType,
@@ -771,17 +756,53 @@ serve(async (req) => {
               '[]'::json
             ) AS media_json
             FROM (
+              -- Product-level: if any compressed_image_url exists, use only those
+              -- (skip image_url). If none, use up to 3 original image_url rows.
               SELECT
-                NULLIF(btrim(pi.image_url), '') AS url,
+                img.url,
                 'image'::text AS media_type,
                 NULL::text AS thumbnail_url,
-                NULLIF(btrim(pi.compressed_image_url), '') AS compressed_url,
-                COALESCE(pi.is_featured, FALSE) AS is_featured,
-                pi.display_order,
+                img.compressed_url,
+                img.is_featured,
+                img.display_order,
                 0 AS tie,
-                pi.image_id AS id
-              FROM property.PROPERTY_IMAGES pi
-              WHERE pi.property_id = b.property_id
+                img.id
+              FROM (
+                SELECT
+                  CASE
+                    WHEN has_c.has_compressed THEN NULLIF(btrim(pi.compressed_image_url), '')
+                    ELSE NULLIF(btrim(pi.image_url), '')
+                  END AS url,
+                  NULLIF(btrim(pi.compressed_image_url), '') AS compressed_url,
+                  COALESCE(pi.is_featured, FALSE) AS is_featured,
+                  pi.display_order,
+                  pi.image_id AS id,
+                  has_c.has_compressed,
+                  ROW_NUMBER() OVER (
+                    ORDER BY pi.display_order ASC NULLS LAST, pi.image_id ASC
+                  ) AS rn
+                FROM property.PROPERTY_IMAGES pi
+                CROSS JOIN LATERAL (
+                  SELECT EXISTS (
+                    SELECT 1
+                    FROM property.PROPERTY_IMAGES x
+                    WHERE x.property_id = b.property_id
+                      AND NULLIF(btrim(x.compressed_image_url), '') IS NOT NULL
+                  ) AS has_compressed
+                ) has_c
+                WHERE pi.property_id = b.property_id
+                  AND (
+                    (
+                      has_c.has_compressed
+                      AND NULLIF(btrim(pi.compressed_image_url), '') IS NOT NULL
+                    )
+                    OR (
+                      NOT has_c.has_compressed
+                      AND NULLIF(btrim(pi.image_url), '') IS NOT NULL
+                    )
+                  )
+              ) img
+              WHERE img.has_compressed OR img.rn <= 3
               UNION ALL
               SELECT
                 pv.video_url AS url,
