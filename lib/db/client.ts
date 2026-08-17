@@ -20,19 +20,49 @@ function getPool(): Pool {
   return pool;
 }
 
+export type QueryParam =
+  | string
+  | number
+  | boolean
+  | Date
+  | null
+  | string[]
+  | number[]
+  | boolean[];
+
 export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
-  params?: Array<
-    | string
-    | number
-    | boolean
-    | Date
-    | null
-    | string[]
-    | number[]
-    | boolean[]
-  >
+  params?: QueryParam[]
 ): Promise<QueryResult<T>> {
   const pgPool = getPool();
   return pgPool.query<T>(text, params);
+}
+
+/**
+ * Run multiple queries in a single DB transaction.
+ */
+export async function withTransaction<T>(
+  fn: (txQuery: typeof query) => Promise<T>
+): Promise<T> {
+  const client = await getPool().connect();
+  const txQuery = async <R extends QueryResultRow = QueryResultRow>(
+    text: string,
+    params?: QueryParam[]
+  ): Promise<QueryResult<R>> => client.query<R>(text, params);
+
+  try {
+    await client.query('BEGIN');
+    const result = await fn(txQuery);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Ignore rollback errors; original error is more useful.
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }

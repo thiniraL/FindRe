@@ -74,6 +74,11 @@ If SMTP env vars are missing or wrong, the API still returns success but emails 
   - Send `email` on first authorization (Apple only returns it once to the client)
 - `POST /api/auth/refresh` - Refresh access token
 - `POST /api/auth/logout` - Logout
+- `POST /api/auth/change-password` - Change password (authenticated)
+- `DELETE /api/auth/delete-account` (or `POST`) - Permanently delete own account
+  - Auth: Bearer access token
+  - Body: `{ "confirm": true }`
+  - Removes user, sessions, preferences, views/likes, refresh tokens, OAuth identities, and roles
 - `POST /api/auth/verify-email` - Verify email
 - `POST /api/auth/forgot-password` - Request password reset
 - `POST /api/auth/reset-password` - Reset password

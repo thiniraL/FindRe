@@ -80,6 +80,13 @@ export const changePasswordSchema = z.object({
   path: ['newPassword'],
 });
 
+/** Logged-in user permanently deleting their own account */
+export const deleteAccountSchema = z.object({
+  confirm: z.literal(true, {
+    errorMap: () => ({ message: 'confirm must be true to delete account' }),
+  }),
+});
+
 // User management schemas
 export const updateUserSchema = z.object({
   email: z.string().email('Invalid email address').optional(),

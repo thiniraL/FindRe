@@ -1,7 +1,9 @@
-import { query } from '@/lib/db/client';
+import { query, withTransaction } from '@/lib/db/client';
 import { User, UserWithPassword } from '@/lib/types/auth';
 import { hashPassword, generateToken } from '@/lib/auth/password';
 import { AppError } from '@/lib/utils/errors';
+import { feedPrefsCache } from '@/lib/cache';
+import { invalidateUserPermissionsCache } from '@/lib/authz/rbac';
 
 export const EMAIL_VERIFICATION_OTP_TTL_MS = 10 * 60 * 1000;
 
@@ -77,6 +79,62 @@ export async function createUserWithVerificationToken(
  */
 export async function deleteUserById(userId: string): Promise<void> {
   await query('DELETE FROM login.users WHERE id = $1', [userId]);
+}
+
+/**
+ * Fully delete a user account and all associated personal data.
+ * Auth-related rows (roles, permissions, identities, refresh tokens) cascade
+ * from login.users. Activity tables use ON DELETE SET NULL, so they are
+ * removed explicitly (sessions, preferences, views/likes).
+ */
+export async function deleteUserAccountFully(userId: string): Promise<void> {
+  const sessions = await query<{ session_id: string }>(
+    `SELECT session_id
+     FROM user_activity.user_sessions
+     WHERE user_id = $1`,
+    [userId]
+  );
+  const sessionIds = sessions.rows.map((row) => row.session_id);
+
+  await withTransaction(async (txQuery) => {
+    // Views/likes (favourites) tied to the account
+    await txQuery(
+      `DELETE FROM property.property_views
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    // Computed / onboarding preferences tied to the account
+    await txQuery(
+      `DELETE FROM user_activity.user_preferences
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    // User sessions (also cascades any remaining views/prefs by session_id)
+    await txQuery(
+      `DELETE FROM user_activity.user_sessions
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    // User row — CASCADE removes roles, permissions, identities, refresh tokens
+    const deleted = await txQuery(
+      `DELETE FROM login.users
+       WHERE id = $1
+       RETURNING id`,
+      [userId]
+    );
+
+    if (!deleted.rows[0]) {
+      throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+    }
+  });
+
+  for (const sessionId of sessionIds) {
+    feedPrefsCache.delete(`feed_prefs:${sessionId}`);
+  }
+  invalidateUserPermissionsCache(userId);
 }
 
 /**

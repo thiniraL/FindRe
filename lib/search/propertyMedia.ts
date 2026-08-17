@@ -73,7 +73,7 @@ export function imageMediaUrls(items: PropertyMediaItem[]): string[] {
 
 /** TEMP: inject a known video at additionalMedia order 4 for client load testing. Remove after QA. */
 export const TEMP_TEST_VIDEO_URL =
-  'https://samplelib.com/mp4/sample-5s.mp4';
+  'https://findre.s3.eu-north-1.amazonaws.com/uploads/1/videos/vid_1786939174111_5xl2wjy.mp4';
 export const TEMP_TEST_VIDEO_THUMBNAIL_URL =
   'https://findre.s3.eu-north-1.amazonaws.com/staging/property-images/53981/3932519.jpg';
 const TEMP_TEST_VIDEO_ORDER = 4;
