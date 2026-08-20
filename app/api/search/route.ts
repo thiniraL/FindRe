@@ -3,7 +3,7 @@ import { createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors
 import { validateQuery, validateBody } from '@/lib/security/validation';
 import { searchQuerySchema, searchBodySchema, agentIdFilterEntrySchema, normalizeAgentIds } from '@/lib/security/validation';
 import { getSearchQueryBy } from '@/lib/search/typesenseSchema';
-import { zipMediaUrls, toMediaItem, imageMediaUrls, withTempTestVideo } from '@/lib/search/propertyMedia';
+import { zipMediaUrls, toMediaItem, imageMediaUrls } from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import {
   buildFilterBy,
@@ -294,12 +294,10 @@ async function mapHitsToItems(
       d.primary_media_type,
       d.primary_thumbnail_url
     );
-    const additionalMedia = withTempTestVideo(
-      zipMediaUrls(
-        d.additional_image_urls,
-        d.additional_media_types,
-        d.additional_thumbnail_urls
-      )
+    const additionalMedia = zipMediaUrls(
+      d.additional_image_urls,
+      d.additional_media_types,
+      d.additional_thumbnail_urls
     );
     return {
       property: {

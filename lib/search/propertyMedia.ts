@@ -70,28 +70,3 @@ export function mediaItemUrls(items: PropertyMediaItem[]): string[] {
 export function imageMediaUrls(items: PropertyMediaItem[]): string[] {
   return items.filter((item) => item.mediaType === 'image').map((item) => item.url);
 }
-
-/** TEMP: inject a known video at additionalMedia order 4 for client load testing. Remove after QA. */
-export const TEMP_TEST_VIDEO_URL =
-  'https://findre.s3.eu-north-1.amazonaws.com/uploads/1/videos/vid_1786939174111_5xl2wjy.mp4';
-export const TEMP_TEST_VIDEO_THUMBNAIL_URL =
-  'https://findre.s3.eu-north-1.amazonaws.com/staging/property-images/53981/3932519.jpg';
-const TEMP_TEST_VIDEO_ORDER = 4;
-
-export function withTempTestVideo<T extends { url: string; mediaType: 'image' | 'video'; thumbnailUrl?: string }>(
-  items: T[]
-): T[] {
-  const index = TEMP_TEST_VIDEO_ORDER - 1;
-  const next = [...items];
-  const video = {
-    url: TEMP_TEST_VIDEO_URL,
-    mediaType: 'video' as const,
-    thumbnailUrl: TEMP_TEST_VIDEO_THUMBNAIL_URL,
-  };
-  if (next.length > index) {
-    next[index] = { ...next[index], ...video };
-    return next;
-  }
-  next.push({ ...(next[0] ?? {}), ...video } as T);
-  return next;
-}

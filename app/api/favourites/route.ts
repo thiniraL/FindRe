@@ -6,7 +6,7 @@ import { AppError, createErrorResponse, createPaginatedResponse } from '@/lib/ut
 import { validateQuery } from '@/lib/security/validation';
 import { getLikedPropertyIds } from '@/lib/db/queries/propertyViews';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
-import { zipMediaUrls, toMediaItem, imageMediaUrls, withTempTestVideo } from '@/lib/search/propertyMedia';
+import { zipMediaUrls, toMediaItem, imageMediaUrls } from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import { typesenseSearch } from '@/lib/search/typesense';
 import { verifyAccessToken } from '@/lib/auth/jwt';
@@ -118,12 +118,10 @@ function docToFavouriteItem(d: TypesensePropertyDoc, lang: 'en' | 'ar'): Favouri
     d.primary_media_type,
     d.primary_thumbnail_url
   );
-  const additionalMedia = withTempTestVideo(
-    zipMediaUrls(
-      d.additional_image_urls,
-      d.additional_media_types,
-      d.additional_thumbnail_urls
-    )
+  const additionalMedia = zipMediaUrls(
+    d.additional_image_urls,
+    d.additional_media_types,
+    d.additional_thumbnail_urls
   );
   return {
     property: {
