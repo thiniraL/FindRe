@@ -135,7 +135,7 @@ function priceBucketToFilter(bucket: string): string {
  * Build Typesense sort_by using _eval (boost by preference conditions).
  * Beds/baths/price are amplified; features are capped/top-N so amenities cannot
  * outrank structural matches. Scores clamped 0-127.
- * Returns null if no clauses. Syntax: _eval([ (expr):score, ... ]):desc,updated_at:desc
+ * Returns null if no clauses. Syntax: _eval([ (expr):score, ... ]):desc
  */
 function buildSortByEval(counters: PreferenceCounters | null): string | null {
   if (!counters) return null;
@@ -178,7 +178,7 @@ function buildSortByEval(counters: PreferenceCounters | null): string | null {
   }
 
   if (clauses.length === 0) return null;
-  return `_eval([${clauses.join(',')}]):desc,updated_at:desc`;
+  return `_eval([${clauses.join(',')}]):desc`;
 }
 
 function scorePropertyByPreferences(
@@ -307,22 +307,33 @@ function docToFeedItem(
 
 function rerankHitsByPreferences(
   hits: Array<{ document: TypesensePropertyDoc }>,
-  counters: PreferenceCounters | null
+  counters: PreferenceCounters | null,
+  options?: { featuredFirst?: boolean }
 ): Array<{ document: TypesensePropertyDoc }> {
   if (!counters) return hits;
+  const featuredFirst = options?.featuredFirst === true;
   return hits
     .map((h) => ({
       hit: h,
+      isFeatured: h.document.is_featured ? 1 : 0,
+      featuredRank:
+        h.document.featured_rank == null
+          ? Number.MAX_SAFE_INTEGER
+          : h.document.featured_rank,
       personalScore: scorePropertyByPreferences(h.document, counters),
-      updatedAt: h.document.updated_at ?? 0,
       propertyId: Number(h.document.property_id) || 0,
     }))
     .sort((a, b) => {
-      // Higher personal score first
+      if (featuredFirst) {
+        // Featured block always before non-featured
+        if (b.isFeatured !== a.isFeatured) return b.isFeatured - a.isFeatured;
+        // Within featured: keep featured_rank ASC
+        if (a.isFeatured && b.isFeatured && a.featuredRank !== b.featuredRank) {
+          return a.featuredRank - b.featuredRank;
+        }
+      }
+      // Preference score (secondary when featuredFirst; primary otherwise)
       if (b.personalScore !== a.personalScore) return b.personalScore - a.personalScore;
-      // Then newer updates first (stable-ish pagination)
-      if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
-      // Finally, deterministic tie-breaker
       return b.propertyId - a.propertyId;
     })
     .map((x) => x.hit);
@@ -345,19 +356,17 @@ export async function GET(request: NextRequest) {
       if (prefs) feedPrefsCache.set(feedPrefsKey, prefs);
     }
     const prefsFromCache = !!cachedPrefs;
-    const counters =
-      prefs?.is_ready_for_recommendations && prefs
-        ? ((prefs.preference_counters ?? null) as PreferenceCounters | null)
-        : null;
+    const isReady = !!prefs?.is_ready_for_recommendations;
+    // Use counters whenever present — including before ready (featured-first + prefs).
+    const counters = (prefs?.preference_counters ?? null) as PreferenceCounters | null;
 
     const filterBy = countryId ? `country_id:=${countryId}` : undefined;
-    // Rebuild _eval from counters with balanced weights (ignore stale DB sort string).
-    const sortByEval =
-      prefs?.is_ready_for_recommendations
-        ? buildSortByEval(counters) ??
-          (prefs.typesense_feed_sort_by || null)
-        : null;
-    const sortBy = sortByEval ?? 'is_featured:desc,featured_rank:asc,updated_at:desc';
+    // ready=true: preference sort only. ready=false: featured-first (prefs applied in app rerank).
+    const sortByEval = isReady
+      ? buildSortByEval(counters) ??
+        (prefs?.typesense_feed_sort_by?.replace(/,updated_at:desc$/i, '') || null)
+      : null;
+    const sortBy = sortByEval ?? 'is_featured:desc,featured_rank:asc';
 
     const [resp, freshLastAnalyzed] = prefsFromCache
       ? await Promise.all([
@@ -389,10 +398,10 @@ export async function GET(request: NextRequest) {
       feedPrefsCache.delete(feedPrefsKey);
     }
 
-    // Always app-rerank when ready: Typesense _eval is a first pass only and can
-    // disagree with preference weights (amenities / updated_at side effects).
+    // ready=false: featured first, then preference within groups.
+    // ready=true: preference only (no featured priority).
     const hits = counters
-      ? rerankHitsByPreferences(resp.hits, counters)
+      ? rerankHitsByPreferences(resp.hits, counters, { featuredFirst: !isReady })
       : resp.hits;
     const items: FeedItem[] = hits.map((h) =>
       docToFeedItem(h.document, lang, h.document.is_featured ?? false)
