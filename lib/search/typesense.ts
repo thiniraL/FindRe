@@ -88,25 +88,36 @@ export async function typesenseSearch<TDoc>(options: {
   /** Typesense NL model id (e.g. gemini-model). Required when nlQuery is true. */
   nlModelId?: string;
 }): Promise<TypesenseSearchResponse<TDoc>> {
-  const params = new URLSearchParams();
-  params.set('q', options.q);
-  params.set('query_by', options.queryBy);
-  params.set('page', String(options.page));
-  params.set('per_page', String(options.perPage));
-  if (options.filterBy) params.set('filter_by', options.filterBy);
-  if (options.sortBy) params.set('sort_by', options.sortBy);
+  // Always POST /multi_search — GET query strings max out at 4000 chars (long _eval sort_by).
+  const searchBody: Record<string, string | number | boolean> = {
+    collection: options.collection,
+    q: options.q,
+    query_by: options.queryBy,
+    page: options.page,
+    per_page: options.perPage,
+  };
+  if (options.filterBy) searchBody.filter_by = options.filterBy;
+  if (options.sortBy) searchBody.sort_by = options.sortBy;
   if (options.nlQuery === true && options.nlModelId) {
-    params.set('nl_query', 'true');
-    params.set('nl_model_id', options.nlModelId);
+    searchBody.nl_query = true;
+    searchBody.nl_model_id = options.nlModelId;
     if (process.env.TYPESENSE_NL_QUERY_DEBUG === 'true') {
-      params.set('nl_query_debug', 'true');
+      searchBody.nl_query_debug = true;
     }
   }
 
-  return await typesenseFetch<TypesenseSearchResponse<TDoc>>(
-    `/collections/${encodeURIComponent(options.collection)}/documents/search?${params.toString()}`,
-    { method: 'GET' }
-  );
+  const raw = await typesenseFetch<
+    TypesenseSearchResponse<TDoc> & { results?: TypesenseSearchResponse<TDoc>[] }
+  >('/multi_search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ searches: [searchBody] }),
+  });
+
+  if (Array.isArray(raw.results) && raw.results[0]) {
+    return raw.results[0];
+  }
+  return raw;
 }
 
 type NlSearchParams = {
