@@ -96,6 +96,17 @@ type PreferenceCounters = {
   features?: Record<string, number>;
 };
 
+/** Structural prefs must dominate stackable amenity matches in Typesense _eval. */
+const EVAL_BED_BATH_PRICE_MULT = 4;
+const EVAL_PROPERTY_TYPE_MULT = 2;
+const EVAL_FEATURE_DIVISOR = 10;
+const EVAL_FEATURE_CAP = 5;
+const EVAL_TOP_FEATURES = 8;
+
+function clampEvalScore(n: number): number {
+  return Math.min(127, Math.max(0, Math.floor(n)));
+}
+
 function bucketPrice(price: number | null | undefined): string | null {
   if (price == null) return null;
   if (price < 1_000_000) return '0-1000000';
@@ -122,6 +133,8 @@ function priceBucketToFilter(bucket: string): string {
 
 /**
  * Build Typesense sort_by using _eval (boost by preference conditions).
+ * Beds/baths/price are amplified; features are capped/top-N so amenities cannot
+ * outrank structural matches. Scores clamped 0-127.
  * Returns null if no clauses. Syntax: _eval([ (expr):score, ... ]):desc,updated_at:desc
  */
 function buildSortByEval(counters: PreferenceCounters | null): string | null {
@@ -130,33 +143,37 @@ function buildSortByEval(counters: PreferenceCounters | null): string | null {
 
   if (counters.bedrooms) {
     for (const [k, score] of Object.entries(counters.bedrooms)) {
-      const s = Math.min(127, Math.max(0, Math.floor(score)));
+      const s = clampEvalScore(score * EVAL_BED_BATH_PRICE_MULT);
       if (s > 0) clauses.push(`(bedrooms:=${k}):${s}`);
     }
   }
   if (counters.bathrooms) {
     for (const [k, score] of Object.entries(counters.bathrooms)) {
-      const s = Math.min(127, Math.max(0, Math.floor(score)));
+      const s = clampEvalScore(score * EVAL_BED_BATH_PRICE_MULT);
       if (s > 0) clauses.push(`(bathrooms:=${k}):${s}`);
     }
   }
   if (counters.price_buckets) {
     for (const [bucket, score] of Object.entries(counters.price_buckets)) {
-      const s = Math.min(127, Math.max(0, Math.floor(score)));
+      const s = clampEvalScore(score * EVAL_BED_BATH_PRICE_MULT);
       const filter = priceBucketToFilter(bucket);
       if (s > 0 && filter) clauses.push(`(${filter}):${s}`);
     }
   }
   if (counters.property_types) {
     for (const [k, score] of Object.entries(counters.property_types)) {
-      const s = Math.min(127, Math.max(0, Math.floor(score)));
+      const s = clampEvalScore(score * EVAL_PROPERTY_TYPE_MULT);
       if (s > 0) clauses.push(`(property_type_id:=${k}):${s}`);
     }
   }
   if (counters.features) {
-    for (const [key, score] of Object.entries(counters.features)) {
-      const s = Math.min(127, Math.max(0, Math.floor(score)));
-      if (s > 0 && key) clauses.push(`(features:=${key}):${s}`);
+    const topFeatures = Object.entries(counters.features)
+      .filter(([key, score]) => key && score > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, EVAL_TOP_FEATURES);
+    for (const [key, score] of topFeatures) {
+      const s = clampEvalScore(Math.min(EVAL_FEATURE_CAP, score / EVAL_FEATURE_DIVISOR));
+      if (s > 0) clauses.push(`(features:=${key}):${s}`);
     }
   }
 
@@ -171,31 +188,35 @@ function scorePropertyByPreferences(
   if (!counters) return 0;
   let score = 0;
 
-  // Bedrooms
   if (doc.bedrooms != null && counters.bedrooms) {
-    score += counters.bedrooms[String(doc.bedrooms)] ?? 0;
+    score += (counters.bedrooms[String(doc.bedrooms)] ?? 0) * EVAL_BED_BATH_PRICE_MULT;
   }
 
-  // Bathrooms
   if (doc.bathrooms != null && counters.bathrooms) {
-    score += counters.bathrooms[String(doc.bathrooms)] ?? 0;
+    score += (counters.bathrooms[String(doc.bathrooms)] ?? 0) * EVAL_BED_BATH_PRICE_MULT;
   }
 
-  // Price bucket
   const bucket = bucketPrice(doc.price ?? null);
   if (bucket && counters.price_buckets) {
-    score += counters.price_buckets[bucket] ?? 0;
+    score += (counters.price_buckets[bucket] ?? 0) * EVAL_BED_BATH_PRICE_MULT;
   }
 
-  // Property type
   if (doc.property_type_id != null && counters.property_types) {
-    score += counters.property_types[String(doc.property_type_id)] ?? 0;
+    score += (counters.property_types[String(doc.property_type_id)] ?? 0) * EVAL_PROPERTY_TYPE_MULT;
   }
 
-  // Features
   if (doc.features && counters.features) {
+    const allowed = new Set(
+      Object.entries(counters.features)
+        .filter(([key, s]) => key && s > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, EVAL_TOP_FEATURES)
+        .map(([key]) => key)
+    );
     for (const f of doc.features) {
-      score += counters.features[f] ?? 0;
+      if (!allowed.has(f)) continue;
+      const raw = counters.features[f] ?? 0;
+      score += Math.min(EVAL_FEATURE_CAP, raw / EVAL_FEATURE_DIVISOR);
     }
   }
 
@@ -330,11 +351,12 @@ export async function GET(request: NextRequest) {
         : null;
 
     const filterBy = countryId ? `country_id:=${countryId}` : undefined;
-    // Use pre-computed sort from DB when present; else build from counters; else featured then updated_at.
+    // Rebuild _eval from counters with balanced weights (ignore stale DB sort string).
     const sortByEval =
-      prefs?.is_ready_for_recommendations && prefs.typesense_feed_sort_by
-        ? prefs.typesense_feed_sort_by
-        : buildSortByEval(counters);
+      prefs?.is_ready_for_recommendations
+        ? buildSortByEval(counters) ??
+          (prefs.typesense_feed_sort_by || null)
+        : null;
     const sortBy = sortByEval ?? 'is_featured:desc,featured_rank:asc,updated_at:desc';
 
     const [resp, freshLastAnalyzed] = prefsFromCache

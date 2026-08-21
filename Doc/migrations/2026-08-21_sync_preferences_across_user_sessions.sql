@@ -99,6 +99,101 @@ $$ LANGUAGE plpgsql STABLE;
 COMMENT ON FUNCTION user_activity.session_viewed_all_featured(VARCHAR) IS
   'TRUE when session (or its linked user) has any view (like or dislike) for every featured listing';
 
+-- Balanced Typesense _eval builder (also in 2026-08-21_rebalance_feed_eval_weights.sql)
+CREATE OR REPLACE FUNCTION user_activity.build_typesense_feed_sort_by(p_counters JSONB)
+RETURNS TEXT AS $$
+DECLARE
+    v_clauses TEXT[] := ARRAY[]::TEXT[];
+    v_part TEXT;
+    v_bedrooms JSONB;
+    v_bathrooms JSONB;
+    v_price JSONB;
+    v_types JSONB;
+    v_features JSONB;
+BEGIN
+    IF p_counters IS NULL OR p_counters = '{}'::jsonb THEN
+        RETURN NULL;
+    END IF;
+
+    v_bedrooms := COALESCE(p_counters->'bedrooms', '{}'::jsonb);
+    v_bathrooms := COALESCE(p_counters->'bathrooms', '{}'::jsonb);
+    v_price := COALESCE(p_counters->'price_buckets', '{}'::jsonb);
+    v_types := COALESCE(p_counters->'property_types', '{}'::jsonb);
+    v_features := COALESCE(p_counters->'features', '{}'::jsonb);
+
+    SELECT string_agg(
+        '(bedrooms:=' || key || '):' || LEAST(127, GREATEST(0, ((value::numeric) * 4)::int)),
+        ','
+    ) INTO v_part
+    FROM jsonb_each_text(v_bedrooms) AS t(key, value)
+    WHERE (value::numeric)::int > 0;
+    IF v_part IS NOT NULL AND v_part <> '' THEN
+        v_clauses := array_append(v_clauses, v_part);
+    END IF;
+
+    SELECT string_agg(
+        '(bathrooms:=' || key || '):' || LEAST(127, GREATEST(0, ((value::numeric) * 4)::int)),
+        ','
+    ) INTO v_part
+    FROM jsonb_each_text(v_bathrooms) AS t(key, value)
+    WHERE (value::numeric)::int > 0;
+    IF v_part IS NOT NULL AND v_part <> '' THEN
+        v_clauses := array_append(v_clauses, v_part);
+    END IF;
+
+    SELECT string_agg(
+        '(' || CASE t.key
+            WHEN '0-1000000' THEN 'price:[0..1000000]'
+            WHEN '1000000-2000000' THEN 'price:[1000000..2000000]'
+            WHEN '2000000-5000000' THEN 'price:[2000000..5000000]'
+            WHEN '5000000+' THEN 'price:>=5000000'
+            ELSE NULL
+        END || '):' || LEAST(127, GREATEST(0, ((t.value::numeric) * 4)::int)),
+        ','
+    ) INTO v_part
+    FROM jsonb_each_text(v_price) AS t(key, value)
+    WHERE (value::numeric)::int > 0
+      AND t.key IN ('0-1000000', '1000000-2000000', '2000000-5000000', '5000000+');
+    IF v_part IS NOT NULL AND v_part <> '' THEN
+        v_clauses := array_append(v_clauses, v_part);
+    END IF;
+
+    SELECT string_agg(
+        '(property_type_id:=' || key || '):' || LEAST(127, GREATEST(0, ((value::numeric) * 2)::int)),
+        ','
+    ) INTO v_part
+    FROM jsonb_each_text(v_types) AS t(key, value)
+    WHERE (value::numeric)::int > 0;
+    IF v_part IS NOT NULL AND v_part <> '' THEN
+        v_clauses := array_append(v_clauses, v_part);
+    END IF;
+
+    SELECT string_agg(
+        '(features:=' || key || '):' || score::text,
+        ','
+    ) INTO v_part
+    FROM (
+        SELECT
+            key,
+            LEAST(5, GREATEST(0, FLOOR((value::numeric) / 10.0)::int)) AS score
+        FROM jsonb_each_text(v_features) AS t(key, value)
+        WHERE key IS NOT NULL AND key <> '' AND (value::numeric)::int > 0
+        ORDER BY (value::numeric) DESC, key
+        LIMIT 8
+    ) AS top_feat
+    WHERE score > 0;
+    IF v_part IS NOT NULL AND v_part <> '' THEN
+        v_clauses := array_append(v_clauses, v_part);
+    END IF;
+
+    IF array_length(v_clauses, 1) > 0 THEN
+        RETURN '_eval([' || array_to_string(v_clauses, ',') || ']):desc,updated_at:desc';
+    END IF;
+
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql IMMUTABLE;
+
 -- -----------------------------------------------------------------------------
 -- analyze_user_preferences: user-scoped analysis + sync all session prefs
 -- -----------------------------------------------------------------------------
@@ -136,8 +231,6 @@ DECLARE
     v_preference_counters JSONB;
 
     v_typesense_feed_sort_by TEXT;
-    v_part TEXT;
-    v_clauses TEXT[] := ARRAY[]::TEXT[];
 BEGIN
     SELECT user_id
     INTO v_user_id
@@ -395,68 +488,8 @@ BEGIN
         'features', COALESCE(v_feature_counts, '{}'::jsonb)
     );
 
-    SELECT string_agg(
-        '(bedrooms:=' || key || '):' || LEAST(127, GREATEST(0, (value::numeric)::int)),
-        ','
-    ) INTO v_part
-    FROM jsonb_each_text(COALESCE(v_bedrooms_counts, '{}'::jsonb)) AS t(key, value)
-    WHERE (value::numeric)::int > 0;
-    IF v_part IS NOT NULL AND v_part <> '' THEN
-        v_clauses := array_append(v_clauses, v_part);
-    END IF;
-
-    SELECT string_agg(
-        '(bathrooms:=' || key || '):' || LEAST(127, GREATEST(0, (value::numeric)::int)),
-        ','
-    ) INTO v_part
-    FROM jsonb_each_text(COALESCE(v_bathrooms_counts, '{}'::jsonb)) AS t(key, value)
-    WHERE (value::numeric)::int > 0;
-    IF v_part IS NOT NULL AND v_part <> '' THEN
-        v_clauses := array_append(v_clauses, v_part);
-    END IF;
-
-    SELECT string_agg(
-        '(' || CASE t.key
-            WHEN '0-1000000' THEN 'price:[0..1000000]'
-            WHEN '1000000-2000000' THEN 'price:[1000000..2000000]'
-            WHEN '2000000-5000000' THEN 'price:[2000000..5000000]'
-            WHEN '5000000+' THEN 'price:>=5000000'
-            ELSE NULL
-        END || '):' || LEAST(127, GREATEST(0, (t.value::numeric)::int)),
-        ','
-    ) INTO v_part
-    FROM jsonb_each_text(COALESCE(v_price_bucket_counts, '{}'::jsonb)) AS t(key, value)
-    WHERE (value::numeric)::int > 0
-      AND t.key IN ('0-1000000', '1000000-2000000', '2000000-5000000', '5000000+');
-    IF v_part IS NOT NULL AND v_part <> '' THEN
-        v_clauses := array_append(v_clauses, v_part);
-    END IF;
-
-    SELECT string_agg(
-        '(property_type_id:=' || key || '):' || LEAST(127, GREATEST(0, (value::numeric)::int)),
-        ','
-    ) INTO v_part
-    FROM jsonb_each_text(COALESCE(v_property_type_counts, '{}'::jsonb)) AS t(key, value)
-    WHERE (value::numeric)::int > 0;
-    IF v_part IS NOT NULL AND v_part <> '' THEN
-        v_clauses := array_append(v_clauses, v_part);
-    END IF;
-
-    SELECT string_agg(
-        '(features:=' || key || '):' || LEAST(127, GREATEST(0, (value::numeric)::int)),
-        ','
-    ) INTO v_part
-    FROM jsonb_each_text(COALESCE(v_feature_counts, '{}'::jsonb)) AS t(key, value)
-    WHERE (value::numeric)::int > 0 AND key IS NOT NULL AND key <> '';
-    IF v_part IS NOT NULL AND v_part <> '' THEN
-        v_clauses := array_append(v_clauses, v_part);
-    END IF;
-
-    IF array_length(v_clauses, 1) > 0 THEN
-        v_typesense_feed_sort_by := '_eval([' || array_to_string(v_clauses, ',') || ']):desc,updated_at:desc';
-    ELSE
-        v_typesense_feed_sort_by := NULL;
-    END IF;
+    -- Balanced Typesense _eval (beds/baths/price dominate features)
+    v_typesense_feed_sort_by := user_activity.build_typesense_feed_sort_by(v_preference_counters);
 
     -- Upsert prefs for this session, and for every other session of the same user
     INSERT INTO user_activity.USER_PREFERENCES (
