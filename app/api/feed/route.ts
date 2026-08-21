@@ -389,8 +389,11 @@ export async function GET(request: NextRequest) {
       feedPrefsCache.delete(feedPrefsKey);
     }
 
-    // When we used _eval, Typesense already ranked by preferences; no app rerank. Otherwise keep order.
-    const hits = sortByEval ? resp.hits : rerankHitsByPreferences(resp.hits, counters);
+    // Always app-rerank when ready: Typesense _eval is a first pass only and can
+    // disagree with preference weights (amenities / updated_at side effects).
+    const hits = counters
+      ? rerankHitsByPreferences(resp.hits, counters)
+      : resp.hits;
     const items: FeedItem[] = hits.map((h) =>
       docToFeedItem(h.document, lang, h.document.is_featured ?? false)
     );
