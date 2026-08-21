@@ -12,6 +12,7 @@ import { roleNameCache } from '@/lib/authz/cache';
 import { AppError } from '@/lib/utils/errors';
 import { linkSessionToUser, createOrUpdateUserSession } from '@/lib/db/queries/sessions';
 import { mergeGuestViewsIntoUser } from '@/lib/db/queries/propertyViews';
+import { analyzePreferences } from '@/lib/db/queries/preferences';
 import * as crypto from 'crypto';
 
 const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
@@ -129,6 +130,7 @@ async function handler(request: NextRequest) {
 
     if (body.sessionId) {
       await mergeGuestViewsIntoUser(body.sessionId, user.id);
+      await analyzePreferences(body.sessionId);
     }
 
     return createSuccessResponse({

@@ -47,6 +47,39 @@ export type UserPreferencesRow = {
   updated_at: string;
 };
 
+async function clearFeedPrefsCacheForSessionAndUser(
+  sessionId: string,
+  userId?: string | null
+): Promise<void> {
+  feedPrefsCache.delete(`feed_prefs:${sessionId}`);
+
+  const res = await query<{ session_id: string }>(
+    `
+    SELECT DISTINCT s.session_id
+    FROM user_activity.USER_SESSIONS s
+    WHERE s.session_id = $1
+       OR (
+         $2::uuid IS NOT NULL
+         AND s.user_id = $2::uuid
+       )
+       OR (
+         s.user_id IS NOT NULL
+         AND s.user_id = (
+           SELECT user_id
+           FROM user_activity.USER_SESSIONS
+           WHERE session_id = $1
+             AND user_id IS NOT NULL
+         )
+       )
+    `,
+    [sessionId, userId ?? null]
+  );
+
+  for (const row of res.rows) {
+    feedPrefsCache.delete(`feed_prefs:${row.session_id}`);
+  }
+}
+
 export async function upsertOnboardingPreferences(options: {
   sessionId: string;
   userId: string | null;
@@ -120,12 +153,56 @@ export async function upsertOnboardingPreferences(options: {
     ]
   );
 
-  return res.rows[0];
+  const row = res.rows[0];
+
+  // Keep every preference row for this logged-in user aligned with onboarding edits
+  if (options.userId) {
+    await query(
+      `
+      UPDATE user_activity.USER_PREFERENCES
+      SET
+        preferred_bedrooms_min = COALESCE($2, preferred_bedrooms_min),
+        preferred_bedrooms_max = COALESCE($3, preferred_bedrooms_max),
+        preferred_bathrooms_min = COALESCE($4, preferred_bathrooms_min),
+        preferred_bathrooms_max = COALESCE($5, preferred_bathrooms_max),
+        preferred_price_min = COALESCE($6, preferred_price_min),
+        preferred_price_max = COALESCE($7, preferred_price_max),
+        preferred_property_type_ids = COALESCE($8, preferred_property_type_ids),
+        preferred_location_ids = COALESCE($9, preferred_location_ids),
+        preferred_purpose_ids = COALESCE($10, preferred_purpose_ids),
+        preferred_feature_ids = COALESCE($11, preferred_feature_ids),
+        user_id = $1,
+        updated_at = NOW() AT TIME ZONE 'UTC'
+      WHERE user_id = $1
+         OR session_id IN (
+           SELECT session_id
+           FROM user_activity.USER_SESSIONS
+           WHERE user_id = $1
+         )
+      `,
+      [
+        options.userId,
+        body.preferredBedroomsMin ?? null,
+        body.preferredBedroomsMax ?? null,
+        body.preferredBathroomsMin ?? null,
+        body.preferredBathroomsMax ?? null,
+        body.preferredPriceMin ?? null,
+        body.preferredPriceMax ?? null,
+        body.preferredPropertyTypeIds ?? null,
+        body.preferredLocationIds ?? null,
+        body.preferredPurposeIds ?? null,
+        body.preferredFeatureIds ?? null,
+      ]
+    );
+  }
+
+  await clearFeedPrefsCacheForSessionAndUser(options.sessionId, options.userId);
+  return row;
 }
 
 export async function analyzePreferences(sessionId: string): Promise<void> {
   await query(`SELECT analyze_user_preferences($1)`, [sessionId]);
-  feedPrefsCache.delete(`feed_prefs:${sessionId}`);
+  await clearFeedPrefsCacheForSessionAndUser(sessionId);
 }
 
 type PreferencesSummaryRow = {
@@ -180,7 +257,7 @@ type PreferencesForFeedRow = {
   preference_counters: PreferenceCounters | null;
   /** Pre-computed Typesense _eval sort string; used by feed when present */
   typesense_feed_sort_by: string | null;
-  /** TRUE only after session viewed every PROPERTIES.is_featured=TRUE listing. Prefs refresh at 5/10/15… */
+  /** TRUE only after user/session viewed every PROPERTIES.is_featured=TRUE listing. Prefs refresh at 5/10/15… */
   is_ready_for_recommendations: boolean;
   /** Set when analyze_user_preferences last completed; feed clients use as preferencesGeneration */
   last_analyzed_at: string | null;
