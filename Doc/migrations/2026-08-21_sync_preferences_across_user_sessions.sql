@@ -8,11 +8,12 @@
 --   2) Logged-in: analyze ALL non-disliked views for that user_id, then write
 --      the same preference row to every USER_PREFERENCES / USER_SESSIONS for
 --      that user (so two devices / session_ids stay in sync).
---   3) Ready = every is_featured=TRUE property has a non-disliked view
---      (by user_id when logged in, else by session_id).
+--   3) Ready = every is_featured=TRUE property has ANY view (like, dislike, or
+--      plain view) by user_id when logged in, else by session_id.
+--      (Dislikes still excluded from preference counter math.)
 -- =============================================================================
 
--- Helper: logged-in user has viewed every featured listing (non-disliked)
+-- Helper: logged-in user has viewed every featured listing (like OR dislike OR view)
 CREATE OR REPLACE FUNCTION user_activity.user_viewed_all_featured(p_user_id UUID)
 RETURNS BOOLEAN AS $$
 DECLARE
@@ -41,7 +42,6 @@ BEGIN
               FROM property.PROPERTY_VIEWS pv
               WHERE pv.property_id = p.property_id
                 AND pv.user_id = p_user_id
-                AND COALESCE(pv.is_disliked, FALSE) = FALSE
           )
     )
     INTO v_unviewed_exists;
@@ -51,7 +51,7 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION user_activity.user_viewed_all_featured(UUID) IS
-  'TRUE when user has a non-disliked view for every PROPERTIES.is_featured=TRUE listing';
+  'TRUE when user has any view (like or dislike) for every PROPERTIES.is_featured=TRUE listing';
 
 -- Session helper: if session is linked to a user, use user-scoped ready check
 CREATE OR REPLACE FUNCTION user_activity.session_viewed_all_featured(p_session_id VARCHAR(100))
@@ -88,7 +88,6 @@ BEGIN
               FROM property.PROPERTY_VIEWS pv
               WHERE pv.property_id = p.property_id
                 AND pv.session_id = p_session_id
-                AND COALESCE(pv.is_disliked, FALSE) = FALSE
           )
     )
     INTO v_unviewed_exists;
@@ -98,7 +97,7 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 COMMENT ON FUNCTION user_activity.session_viewed_all_featured(VARCHAR) IS
-  'TRUE when session (or its linked user) has viewed every featured listing';
+  'TRUE when session (or its linked user) has any view (like or dislike) for every featured listing';
 
 -- -----------------------------------------------------------------------------
 -- analyze_user_preferences: user-scoped analysis + sync all session prefs
