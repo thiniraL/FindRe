@@ -3,7 +3,11 @@ import { createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors
 import { validateQuery, validateBody } from '@/lib/security/validation';
 import { searchQuerySchema, searchBodySchema, agentIdFilterEntrySchema, normalizeAgentIds } from '@/lib/security/validation';
 import { getSearchQueryBy } from '@/lib/search/typesenseSchema';
-import { imageMediaUrls, primaryThenAllMedia } from '@/lib/search/propertyMedia';
+import {
+  imageMediaUrls,
+  primaryThenAllMedia,
+  SEARCH_MEDIA_MAX,
+} from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import {
   buildFilterBy,
@@ -290,7 +294,7 @@ async function mapHitsToItems(
     const pid = Number(d.property_id);
     const locationParts = [d.address].filter(Boolean);
     const location = locationParts.length ? locationParts.join(', ') : null;
-    // Main/primary first; additionalMedia = all remaining medias (not carousel-capped).
+    // Main/primary first; then remaining medias (max 10 total).
     const { primaryMedia, additionalMedia } = primaryThenAllMedia({
       primaryUrl: d.primary_image_url,
       primaryMediaType: d.primary_media_type,
@@ -301,6 +305,7 @@ async function mapHitsToItems(
       additionalUrls: d.additional_image_urls,
       additionalMediaTypes: d.additional_media_types,
       additionalThumbnailUrls: d.additional_thumbnail_urls,
+      maxTotal: SEARCH_MEDIA_MAX,
     });
     return {
       property: {

@@ -78,9 +78,13 @@ function sameMedia(
   return a.mediaType === b.mediaType && a.url === b.url;
 }
 
+/** Default max media items returned by search (primary + additional). */
+export const SEARCH_MEDIA_MAX = 10;
+
 /**
  * Primary first, then every other media in display order (excluding primary).
  * Prefers full `all_*` arrays when present; falls back to carousel additional.
+ * Caps total returned items to `maxTotal` (default 10).
  */
 export function primaryThenAllMedia(opts: {
   primaryUrl?: string | null;
@@ -92,10 +96,17 @@ export function primaryThenAllMedia(opts: {
   additionalUrls?: string[] | null;
   additionalMediaTypes?: string[] | null;
   additionalThumbnailUrls?: string[] | null;
+  /** Max primary + additional items (default SEARCH_MEDIA_MAX = 10). */
+  maxTotal?: number;
 }): {
   primaryMedia: PropertyMediaItem | null;
   additionalMedia: PropertyMediaItem[];
 } {
+  const maxTotal =
+    typeof opts.maxTotal === 'number' && opts.maxTotal > 0
+      ? Math.floor(opts.maxTotal)
+      : SEARCH_MEDIA_MAX;
+
   const hintedPrimary = toMediaItem(
     opts.primaryUrl,
     opts.primaryMediaType,
@@ -107,23 +118,34 @@ export function primaryThenAllMedia(opts: {
     opts.allThumbnailUrls
   );
 
+  let primaryMedia: PropertyMediaItem | null;
+  let additionalMedia: PropertyMediaItem[];
+
   if (allMedia.length > 0) {
-    const primaryMedia =
+    primaryMedia =
       (hintedPrimary &&
         allMedia.find((item) => sameMedia(item, hintedPrimary))) ??
       hintedPrimary ??
       allMedia[0] ??
       null;
-    const additionalMedia = primaryMedia
+    additionalMedia = primaryMedia
       ? allMedia.filter((item) => !sameMedia(item, primaryMedia))
       : allMedia;
-    return { primaryMedia, additionalMedia };
+  } else {
+    primaryMedia = hintedPrimary;
+    additionalMedia = zipMediaUrls(
+      opts.additionalUrls,
+      opts.additionalMediaTypes,
+      opts.additionalThumbnailUrls
+    );
   }
 
-  const additionalMedia = zipMediaUrls(
-    opts.additionalUrls,
-    opts.additionalMediaTypes,
-    opts.additionalThumbnailUrls
-  );
-  return { primaryMedia: hintedPrimary, additionalMedia };
+  const ordered = primaryMedia
+    ? [primaryMedia, ...additionalMedia]
+    : additionalMedia;
+  const capped = ordered.slice(0, maxTotal);
+  return {
+    primaryMedia: capped[0] ?? null,
+    additionalMedia: capped.slice(1),
+  };
 }
