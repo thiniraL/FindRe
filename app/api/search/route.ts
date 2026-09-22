@@ -3,7 +3,7 @@ import { createErrorResponse, createPaginatedResponse } from '@/lib/utils/errors
 import { validateQuery, validateBody } from '@/lib/security/validation';
 import { searchQuerySchema, searchBodySchema, agentIdFilterEntrySchema, normalizeAgentIds } from '@/lib/security/validation';
 import { getSearchQueryBy } from '@/lib/search/typesenseSchema';
-import { zipMediaUrls, toMediaItem, imageMediaUrls } from '@/lib/search/propertyMedia';
+import { imageMediaUrls, primaryThenAllMedia } from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import {
   buildFilterBy,
@@ -83,6 +83,7 @@ type TypesensePropertyDoc = {
   additional_thumbnail_urls?: string[];
   all_image_urls?: string[];
   all_media_types?: string[];
+  all_thumbnail_urls?: string[];
   image_is_featured?: number[];
 };
 
@@ -289,16 +290,18 @@ async function mapHitsToItems(
     const pid = Number(d.property_id);
     const locationParts = [d.address].filter(Boolean);
     const location = locationParts.length ? locationParts.join(', ') : null;
-    const primaryMedia = toMediaItem(
-      d.primary_image_url,
-      d.primary_media_type,
-      d.primary_thumbnail_url
-    );
-    const additionalMedia = zipMediaUrls(
-      d.additional_image_urls,
-      d.additional_media_types,
-      d.additional_thumbnail_urls
-    );
+    // Main/primary first; additionalMedia = all remaining medias (not carousel-capped).
+    const { primaryMedia, additionalMedia } = primaryThenAllMedia({
+      primaryUrl: d.primary_image_url,
+      primaryMediaType: d.primary_media_type,
+      primaryThumbnailUrl: d.primary_thumbnail_url,
+      allUrls: d.all_image_urls,
+      allMediaTypes: d.all_media_types,
+      allThumbnailUrls: d.all_thumbnail_urls,
+      additionalUrls: d.additional_image_urls,
+      additionalMediaTypes: d.additional_media_types,
+      additionalThumbnailUrls: d.additional_thumbnail_urls,
+    });
     return {
       property: {
         id: pid,
