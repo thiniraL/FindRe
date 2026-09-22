@@ -294,7 +294,7 @@ async function mapHitsToItems(
     const pid = Number(d.property_id);
     const locationParts = [d.address].filter(Boolean);
     const location = locationParts.length ? locationParts.join(', ') : null;
-    // Main/primary first; then remaining medias (max 10 total).
+    // From full media list: main first, then rest — max 10 total.
     const { primaryMedia, additionalMedia } = primaryThenAllMedia({
       primaryUrl: d.primary_image_url,
       primaryMediaType: d.primary_media_type,

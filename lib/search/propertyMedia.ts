@@ -78,13 +78,13 @@ function sameMedia(
   return a.mediaType === b.mediaType && a.url === b.url;
 }
 
-/** Default max media items returned by search (primary + additional). */
+/** Max media items returned by search (primary + additional). */
 export const SEARCH_MEDIA_MAX = 10;
 
 /**
- * Primary first, then every other media in display order (excluding primary).
+ * Primary first, then remaining media in display order (excluding primary).
  * Prefers full `all_*` arrays when present; falls back to carousel additional.
- * Caps total returned items to `maxTotal` (default 10).
+ * Caps total returned items to `maxTotal` (default SEARCH_MEDIA_MAX = 10).
  */
 export function primaryThenAllMedia(opts: {
   primaryUrl?: string | null;
@@ -122,14 +122,15 @@ export function primaryThenAllMedia(opts: {
   let additionalMedia: PropertyMediaItem[];
 
   if (allMedia.length > 0) {
-    primaryMedia =
+    const resolvedPrimary =
       (hintedPrimary &&
         allMedia.find((item) => sameMedia(item, hintedPrimary))) ??
       hintedPrimary ??
       allMedia[0] ??
       null;
-    additionalMedia = primaryMedia
-      ? allMedia.filter((item) => !sameMedia(item, primaryMedia))
+    primaryMedia = resolvedPrimary;
+    additionalMedia = resolvedPrimary
+      ? allMedia.filter((item) => !sameMedia(item, resolvedPrimary))
       : allMedia;
   } else {
     primaryMedia = hintedPrimary;
