@@ -145,7 +145,8 @@ export const queryParamsSchema = z.object({
 
 // Featured / onboarding / views schemas
 export const featuredQuerySchema = z.object({
-  countryId: z.coerce.number().int().min(1),
+  // Accepted from FE but ignored — featured covers all countries.
+  countryId: z.coerce.number().int().min(1).optional(),
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 }).transform(({ countryId, page, limit }) => ({

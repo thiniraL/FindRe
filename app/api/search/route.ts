@@ -35,7 +35,6 @@ export const dynamic = 'force-dynamic';
  *   become filter_by. Empty q → normal Typesense search.
  */
 
-const DEFAULT_COUNTRY_ID = 1;
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 25;
 
@@ -172,7 +171,7 @@ export async function GET(request: NextRequest) {
 
     const filterState: SearchFilterState = {
       purpose: normalizedPurpose,
-      countryId: parsed.countryId ?? DEFAULT_COUNTRY_ID,
+      // countryId from FE is accepted but ignored — search all countries.
       location: parsed.location,
       completionStatus: parsed.completionStatus,
       mainPropertyTypeIds: parseOptionalIntList(parsed.mainPropertyTypeIds)?.filter((n) => n >= 1),
@@ -371,7 +370,7 @@ export async function POST(request: NextRequest) {
 
     const filterState: SearchFilterState = {
       purpose: normalizedPurpose,
-      countryId: body.countryId ?? DEFAULT_COUNTRY_ID,
+      // countryId from FE is accepted but ignored — search all countries.
       location: body.location,
       completionStatuses: body.completionStatus?.length ? body.completionStatus : undefined,
       mainPropertyTypeIds: body.mainPropertyTypeIds?.length ? body.mainPropertyTypeIds : undefined,

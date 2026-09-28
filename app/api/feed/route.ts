@@ -343,7 +343,7 @@ export async function GET(request: NextRequest) {
   try {
     const sessionId = getSessionId(request);
     const userId = tryGetUserIdFromAuthHeader(request);
-    const { page: pageRaw, limit: limitRaw, countryId } = validateQuery(request, feedQuerySchema);
+    const { page: pageRaw, limit: limitRaw } = validateQuery(request, feedQuerySchema);
     const page = pageRaw ?? 1;
     const perPage = limitRaw ?? 25;
     const lang = getLanguageCode(request);
@@ -360,7 +360,8 @@ export async function GET(request: NextRequest) {
     // Use counters whenever present — including before ready (featured-first + prefs).
     const counters = (prefs?.preference_counters ?? null) as PreferenceCounters | null;
 
-    const filterBy = countryId ? `country_id:=${countryId}` : undefined;
+    // countryId from FE is accepted but ignored — feed covers all countries.
+    const filterBy: string | undefined = undefined;
     // ready=true: preference sort only. ready=false: featured-first (prefs applied in app rerank).
     const sortByEval = isReady
       ? buildSortByEval(counters) ??

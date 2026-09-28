@@ -2,7 +2,6 @@ import { NextRequest } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 import {
-  AppError,
   createErrorResponse,
   createPaginatedResponse,
 } from '@/lib/utils/errors';
@@ -22,11 +21,8 @@ function getLanguageCode(request: NextRequest): string {
 export async function GET(request: NextRequest) {
   try {
     const parsed = validateQuery(request, featuredQuerySchema);
-    const countryId = parsed.countryId;
+    // countryId from FE is accepted but ignored — featured covers all countries.
     const page = parsed.page ?? 1;
-    if (countryId === undefined) {
-      throw new AppError('countryId is required', 400, 'COUNTRY_ID_REQUIRED');
-    }
     const limit = parsed.limit || 25;
     const languageCode = getLanguageCode(request);
     const lang = languageCode === 'ar' ? 'ar' : 'en';
@@ -53,7 +49,7 @@ export async function GET(request: NextRequest) {
       collection: 'properties',
       q: '*',
       queryBy: PROPERTIES_QUERY_BY,
-      filterBy: `is_featured:=true && country_id:=${countryId}`,
+      filterBy: 'is_featured:=true',
       sortBy: 'featured_rank:asc,updated_at:desc',
       page,
       perPage: limit,
