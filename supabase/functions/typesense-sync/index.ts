@@ -765,53 +765,26 @@ serve(async (req) => {
               '[]'::json
             ) AS media_json
             FROM (
-              -- Product-level: if any compressed_image_url exists, use only those
-              -- (skip image_url). If none, use up to 3 original image_url rows.
+              -- All images: compressed_image_url when present, else image_url
+              -- (same as the property detail query).
               SELECT
-                img.url,
+                COALESCE(
+                  NULLIF(btrim(pi.compressed_image_url), ''),
+                  NULLIF(btrim(pi.image_url), '')
+                ) AS url,
                 'image'::text AS media_type,
                 NULL::text AS thumbnail_url,
-                img.compressed_url,
-                img.is_featured,
-                img.display_order,
+                NULLIF(btrim(pi.compressed_image_url), '') AS compressed_url,
+                COALESCE(pi.is_featured, FALSE) AS is_featured,
+                pi.display_order,
                 0 AS tie,
-                img.id
-              FROM (
-                SELECT
-                  CASE
-                    WHEN has_c.has_compressed THEN NULLIF(btrim(pi.compressed_image_url), '')
-                    ELSE NULLIF(btrim(pi.image_url), '')
-                  END AS url,
-                  NULLIF(btrim(pi.compressed_image_url), '') AS compressed_url,
-                  COALESCE(pi.is_featured, FALSE) AS is_featured,
-                  pi.display_order,
-                  pi.image_id AS id,
-                  has_c.has_compressed,
-                  ROW_NUMBER() OVER (
-                    ORDER BY pi.display_order ASC NULLS LAST, pi.image_id ASC
-                  ) AS rn
-                FROM property.PROPERTY_IMAGES pi
-                CROSS JOIN LATERAL (
-                  SELECT EXISTS (
-                    SELECT 1
-                    FROM property.PROPERTY_IMAGES x
-                    WHERE x.property_id = b.property_id
-                      AND NULLIF(btrim(x.compressed_image_url), '') IS NOT NULL
-                  ) AS has_compressed
-                ) has_c
-                WHERE pi.property_id = b.property_id
-                  AND (
-                    (
-                      has_c.has_compressed
-                      AND NULLIF(btrim(pi.compressed_image_url), '') IS NOT NULL
-                    )
-                    OR (
-                      NOT has_c.has_compressed
-                      AND NULLIF(btrim(pi.image_url), '') IS NOT NULL
-                    )
-                  )
-              ) img
-              WHERE img.has_compressed OR img.rn <= 3
+                pi.image_id AS id
+              FROM property.PROPERTY_IMAGES pi
+              WHERE pi.property_id = b.property_id
+                AND COALESCE(
+                  NULLIF(btrim(pi.compressed_image_url), ''),
+                  NULLIF(btrim(pi.image_url), '')
+                ) IS NOT NULL
               UNION ALL
               SELECT
                 pv.video_url AS url,
