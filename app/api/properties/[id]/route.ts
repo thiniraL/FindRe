@@ -168,10 +168,6 @@ export async function GET(
       row.state_province ?? row.emirate ?? row.country_name ?? null;
     const addressLine1 =
       row.community ?? row.address_line ?? row.area ?? row.city ?? null;
-    const addressLine2 = [row.community, row.area, row.city]
-      .filter(Boolean)
-      .filter((v, i, a) => a.indexOf(v) === i)
-      .join(', ') || null;
 
     const userId = tryGetUserIdFromAuthHeader(request);
     const sessionId = request.headers.get('x-session-id')?.trim() ?? '';
@@ -243,7 +239,7 @@ export async function GET(
       isOffPlan: row.is_off_plan ?? false,
       location: {
         addressLine1,
-        addressLine2: addressLine2 || (row.city ? `${row.city}` : null),
+        addressLine2: '',
         city: row.city ?? null,
         area: row.area ?? null,
         community: row.community ?? null,
