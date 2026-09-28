@@ -302,6 +302,7 @@ async function mapHitsToItems(
       allUrls: d.all_image_urls,
       allMediaTypes: d.all_media_types,
       allThumbnailUrls: d.all_thumbnail_urls,
+      allIsFeatured: d.image_is_featured,
       additionalUrls: d.additional_image_urls,
       additionalMediaTypes: d.additional_media_types,
       additionalThumbnailUrls: d.additional_thumbnail_urls,

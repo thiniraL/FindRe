@@ -15,7 +15,7 @@ import { getPropertyViewStatus } from '@/lib/db/queries/propertyViews';
 import { propertyDetailCache } from '@/lib/cache';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { unwrapTitle } from '@/lib/search/unwrapTitle';
-import { imageMediaUrls } from '@/lib/search/propertyMedia';
+import { imageMediaUrls, noFeaturedMediaOrder } from '@/lib/search/propertyMedia';
 
 export const dynamic = 'force-dynamic';
 
@@ -190,13 +190,10 @@ export async function GET(
     const videos = parseJsonArray<PropertyVideoJson>(row.videos_json);
     const sortedMedia = buildOrderedMedia(images, videos);
     const hasFeatured = sortedMedia.some((item) => item.isFeatured);
-    // No featured media: videos first, then images (each kept in displayOrder).
+    // No featured media: first image, then videos, then remaining images.
     const orderedMedia = hasFeatured
       ? sortedMedia
-      : [
-          ...sortedMedia.filter((item) => item.mediaType === 'video'),
-          ...sortedMedia.filter((item) => item.mediaType === 'image'),
-        ];
+      : noFeaturedMediaOrder(sortedMedia);
     const featuredPool = hasFeatured
       ? orderedMedia.filter((item) => item.isFeatured)
       : orderedMedia;
