@@ -4,6 +4,8 @@ import { createErrorResponse, createSuccessResponse } from '@/lib/utils/errors';
 import { withAuthorization, requirePermission } from '@/lib/authz/middleware';
 import { JWTPayload } from '@/lib/types/auth';
 
+export const dynamic = 'force-dynamic';
+
 async function handler(_request: NextRequest, _user: JWTPayload) {
   try {
     void _request;
