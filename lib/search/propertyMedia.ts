@@ -78,6 +78,79 @@ function sameMedia(
   return a.mediaType === b.mediaType && a.url === b.url;
 }
 
+/**
+ * Order used when no media is featured: all videos first, then images,
+ * each kept in display order. Input is expected in display order.
+ */
+export function noFeaturedMediaOrder<T extends { mediaType: 'image' | 'video' }>(
+  items: T[]
+): T[] {
+  return [
+    ...items.filter((item) => item.mediaType === 'video'),
+    ...items.filter((item) => item.mediaType === 'image'),
+  ];
+}
+
+/** Max media items in the feed / favourites carousel (primary + additional). */
+export const CAROUSEL_MEDIA_MAX = 5;
+
+/**
+ * Feed / favourites carousel: the synced primary + additional fields (featured
+ * items only when any are featured, max 5). When none are featured, rebuild it
+ * from the full list with videos first so the primary is a video when one exists.
+ */
+export function carouselMedia(opts: {
+  primaryUrl?: string | null;
+  primaryMediaType?: string | null;
+  primaryThumbnailUrl?: string | null;
+  additionalUrls?: string[] | null;
+  additionalMediaTypes?: string[] | null;
+  additionalThumbnailUrls?: string[] | null;
+  allUrls?: string[] | null;
+  allMediaTypes?: string[] | null;
+  allThumbnailUrls?: string[] | null;
+  /** Parallel to allUrls (1 = featured). */
+  allIsFeatured?: number[] | null;
+}): {
+  primaryMedia: PropertyMediaItem | null;
+  additionalMedia: PropertyMediaItem[];
+} {
+  const allMedia = zipMediaUrls(
+    opts.allUrls,
+    opts.allMediaTypes,
+    opts.allThumbnailUrls
+  );
+  // Only trust the featured flags when they line up with the full media list.
+  const noneFeatured =
+    allMedia.length > 0 &&
+    Array.isArray(opts.allIsFeatured) &&
+    Array.isArray(opts.allUrls) &&
+    opts.allIsFeatured.length === opts.allUrls.length &&
+    opts.allIsFeatured.length === allMedia.length &&
+    !opts.allIsFeatured.some((flag) => Number(flag) === 1);
+
+  if (noneFeatured) {
+    const ordered = noFeaturedMediaOrder(allMedia).slice(0, CAROUSEL_MEDIA_MAX);
+    return {
+      primaryMedia: ordered[0] ?? null,
+      additionalMedia: ordered.slice(1),
+    };
+  }
+
+  return {
+    primaryMedia: toMediaItem(
+      opts.primaryUrl,
+      opts.primaryMediaType,
+      opts.primaryThumbnailUrl
+    ),
+    additionalMedia: zipMediaUrls(
+      opts.additionalUrls,
+      opts.additionalMediaTypes,
+      opts.additionalThumbnailUrls
+    ),
+  };
+}
+
 /** Max media items returned by search (primary + additional). */
 export const SEARCH_MEDIA_MAX = 10;
 
@@ -93,6 +166,8 @@ export function primaryThenAllMedia(opts: {
   allUrls?: string[] | null;
   allMediaTypes?: string[] | null;
   allThumbnailUrls?: string[] | null;
+  /** Parallel to allUrls (1 = featured). When none are featured, noFeaturedMediaOrder applies. */
+  allIsFeatured?: number[] | null;
   additionalUrls?: string[] | null;
   additionalMediaTypes?: string[] | null;
   additionalThumbnailUrls?: string[] | null;
@@ -121,7 +196,19 @@ export function primaryThenAllMedia(opts: {
   let primaryMedia: PropertyMediaItem | null;
   let additionalMedia: PropertyMediaItem[];
 
-  if (allMedia.length > 0) {
+  // Only trust the featured flags when they line up with the full media list.
+  const noneFeatured =
+    Array.isArray(opts.allIsFeatured) &&
+    Array.isArray(opts.allUrls) &&
+    opts.allIsFeatured.length === opts.allUrls.length &&
+    opts.allIsFeatured.length === allMedia.length &&
+    !opts.allIsFeatured.some((flag) => Number(flag) === 1);
+
+  if (allMedia.length > 0 && noneFeatured) {
+    const ordered = noFeaturedMediaOrder(allMedia);
+    primaryMedia = ordered[0] ?? null;
+    additionalMedia = ordered.slice(1);
+  } else if (allMedia.length > 0) {
     const resolvedPrimary =
       (hintedPrimary &&
         allMedia.find((item) => sameMedia(item, hintedPrimary))) ??

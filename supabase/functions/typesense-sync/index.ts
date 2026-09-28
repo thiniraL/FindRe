@@ -401,7 +401,7 @@ function buildMediaDocFields(raw: MediaJsonRow[] | string | null | undefined): {
   all_thumbnail_urls: string[] | null;
   image_is_featured: number[] | null;
 } {
-  const media = parseMediaJson(raw)
+  const parsed = parseMediaJson(raw)
     .map((row) => {
       const mediaType = row?.mediaType === 'video' ? ('video' as const) : ('image' as const);
       const url = typeof row?.url === 'string' ? row.url.trim() : '';
@@ -413,6 +413,16 @@ function buildMediaDocFields(raw: MediaJsonRow[] | string | null | undefined): {
       };
     })
     .filter((row) => row.url.length > 0);
+
+  const hasFeatured = parsed.some((row) => row.isFeatured);
+  // No featured media: videos first, then images (each kept in display order),
+  // so the primary is a video when one exists.
+  const media = hasFeatured
+    ? parsed
+    : [
+        ...parsed.filter((row) => row.mediaType === 'video'),
+        ...parsed.filter((row) => row.mediaType === 'image'),
+      ];
 
   if (!media.length) {
     return {
@@ -429,7 +439,6 @@ function buildMediaDocFields(raw: MediaJsonRow[] | string | null | undefined): {
     };
   }
 
-  const hasFeatured = media.some((row) => row.isFeatured);
   const pool = hasFeatured ? media.filter((row) => row.isFeatured) : media;
   const carousel = pool.slice(0, 5);
   const primary = carousel[0] ?? null;

@@ -7,7 +7,10 @@ import { validateQuery } from '@/lib/security/validation';
 import { getLastAnalyzedAtForSession, getPreferencesForFeed } from '@/lib/db/queries/preferences';
 import { feedPrefsCache } from '@/lib/cache';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
-import { zipMediaUrls, toMediaItem, imageMediaUrls } from '@/lib/search/propertyMedia';
+import {
+  carouselMedia,
+  imageMediaUrls,
+} from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import { typesenseSearch } from '@/lib/search/typesense';
 import { verifyAccessToken } from '@/lib/auth/jwt';
@@ -86,6 +89,10 @@ type TypesensePropertyDoc = {
   additional_image_urls?: string[];
   additional_media_types?: string[];
   additional_thumbnail_urls?: string[];
+  all_image_urls?: string[];
+  all_media_types?: string[];
+  all_thumbnail_urls?: string[];
+  image_is_featured?: number[];
 };
 
 type PreferenceCounters = {
@@ -258,16 +265,19 @@ function docToFeedItem(
     ? [d.address].filter(Boolean)
     : [d.address, d.community_en, d.area_en, d.city_en].filter(Boolean);
   const location = locationParts.length ? locationParts.join(', ') : null;
-  const primaryMedia = toMediaItem(
-    d.primary_image_url,
-    d.primary_media_type,
-    d.primary_thumbnail_url
-  );
-  const additionalMedia = zipMediaUrls(
-    d.additional_image_urls,
-    d.additional_media_types,
-    d.additional_thumbnail_urls
-  );
+  // Synced carousel (max 5); videos first when nothing is featured.
+  const { primaryMedia, additionalMedia } = carouselMedia({
+    primaryUrl: d.primary_image_url,
+    primaryMediaType: d.primary_media_type,
+    primaryThumbnailUrl: d.primary_thumbnail_url,
+    allUrls: d.all_image_urls,
+    allMediaTypes: d.all_media_types,
+    allThumbnailUrls: d.all_thumbnail_urls,
+    allIsFeatured: d.image_is_featured,
+    additionalUrls: d.additional_image_urls,
+    additionalMediaTypes: d.additional_media_types,
+    additionalThumbnailUrls: d.additional_thumbnail_urls,
+  });
   return {
     property: {
       id: Number(d.property_id),

@@ -7,7 +7,7 @@ import {
 } from '@/lib/utils/errors';
 import { featuredQuerySchema, validateQuery } from '@/lib/security/validation';
 import { PROPERTIES_QUERY_BY } from '@/lib/search/typesenseSchema';
-import { toMediaItem } from '@/lib/search/propertyMedia';
+import { primaryThenAllMedia } from '@/lib/search/propertyMedia';
 import { pickLocalizedTitle } from '@/lib/search/unwrapTitle';
 import { typesenseSearch } from '@/lib/search/typesense';
 
@@ -35,6 +35,10 @@ export async function GET(request: NextRequest) {
       primary_image_url?: string;
       primary_media_type?: string;
       primary_thumbnail_url?: string;
+      all_image_urls?: string[];
+      all_media_types?: string[];
+      all_thumbnail_urls?: string[];
+      image_is_featured?: number[];
       agent_id?: number;
       agent_name?: string;
       agent_profile_image_url?: string;
@@ -57,11 +61,15 @@ export async function GET(request: NextRequest) {
 
     const items = resp.hits.map((h) => {
       const d = h.document;
-      const primaryMedia = toMediaItem(
-        d.primary_image_url,
-        d.primary_media_type,
-        d.primary_thumbnail_url
-      );
+      const { primaryMedia } = primaryThenAllMedia({
+        primaryUrl: d.primary_image_url,
+        primaryMediaType: d.primary_media_type,
+        primaryThumbnailUrl: d.primary_thumbnail_url,
+        allUrls: d.all_image_urls,
+        allMediaTypes: d.all_media_types,
+        allThumbnailUrls: d.all_thumbnail_urls,
+        allIsFeatured: d.image_is_featured,
+      });
       return {
         rank: d.featured_rank ?? null,
         property: {
