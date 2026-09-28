@@ -188,8 +188,15 @@ export async function GET(
 
     const images = parseJsonArray<PropertyImageJson>(row.images_json);
     const videos = parseJsonArray<PropertyVideoJson>(row.videos_json);
-    const orderedMedia = buildOrderedMedia(images, videos);
-    const hasFeatured = orderedMedia.some((item) => item.isFeatured);
+    const sortedMedia = buildOrderedMedia(images, videos);
+    const hasFeatured = sortedMedia.some((item) => item.isFeatured);
+    // No featured media: videos first, then images (each kept in displayOrder).
+    const orderedMedia = hasFeatured
+      ? sortedMedia
+      : [
+          ...sortedMedia.filter((item) => item.mediaType === 'video'),
+          ...sortedMedia.filter((item) => item.mediaType === 'image'),
+        ];
     const featuredPool = hasFeatured
       ? orderedMedia.filter((item) => item.isFeatured)
       : orderedMedia;
